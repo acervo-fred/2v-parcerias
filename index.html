@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>2V Parcerias</title>
+  <link rel="stylesheet" href="./css/styles.css" />
+</head>
+<body>
+  <div class="layout">
+
+    <!-- ===== Sidebar de navegação ===== -->
+    <aside class="sidebar">
+      <a href="#/" class="side-logo">
+        <span class="side-logo-badge">2V</span>
+        Parcerias
+      </a>
+      <div class="side-tagline">Largo do Machado</div>
+
+      <nav class="side-nav">
+        <a href="#/" data-nav="prospeccao"><span class="ni-ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span> Prospecção</a>
+        <a href="#/parceiros" data-nav="parceiros"><span class="ni-ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span> Parceiros</a>
+        <a href="#/lancamentos" data-nav="lancamentos"><span class="ni-ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></span> Base de dados</a>
+        <a href="#/dashboard" data-nav="dashboard"><span class="ni-ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg></span> Dashboard</a>
+      </nav>
+    </aside>
+
+    <!-- ===== Área principal ===== -->
+    <div class="main">
+      <header class="topbar"></header>
+      <main id="app" class="app"><!-- views renderizadas aqui --></main>
+    </div>
+  </div>
+
+  <!-- container de modais -->
+  <div id="modal-root"></div>
+
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>

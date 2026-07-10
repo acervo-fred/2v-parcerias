@@ -1,0 +1,115 @@
+/* Base de Dados (global) — todos os lançamentos de todos os parceiros,
+   com o nome/cupom sempre resolvido pelo parceiroId (nunca duplicado
+   no lançamento). Ponto de entrada principal pro lançamento em lote:
+   um período, vários cupons de uma vez — jeito real de uso. */
+
+import { store } from "../data/store.js";
+import { esc, formatMoeda, formatDataBR } from "../ui/dom.js";
+import { abrirLancamentoLote, abrirNovoLancamento } from "./cadastros.js";
+
+export async function renderLancamentos(app) {
+  const [lancamentos, parceiros] = await Promise.all([
+    store.listLancamentos(),
+    store.listParceiros(),
+  ]);
+  const porId = Object.fromEntries(parceiros.map((p) => [p.id, p]));
+
+  let busca = "";
+  let filtroParceiro = "";
+
+  const totalUso = lancamentos.reduce((s, l) => s + l.quantidadeUso, 0);
+  const totalCupom = lancamentos.reduce((s, l) => s + l.faturamentoCupom, 0);
+
+  app.innerHTML = `
+    <div class="page-head">
+      <div>
+        <h1 class="page-title">Base de dados</h1>
+        <div class="page-sub">${lancamentos.length} lançamentos registrados</div>
+      </div>
+      <div class="toolbar">
+        <button class="btn btn-ghost" data-act="avulso">+ Lançamento avulso</button>
+        <button class="btn btn-primary" data-act="lote">+ Lançamento em lote</button>
+      </div>
+    </div>
+
+    <div class="stat-grid">
+      ${stat(totalUso, "Usos registrados")}
+      ${stat(formatMoeda(totalCupom), "Faturamento via cupom (total)")}
+      ${stat(parceiros.filter((p) => p.ehParceiro).length, "Parceiros com cupom")}
+    </div>
+
+    <div class="toolbar" style="margin-bottom:16px; gap:10px">
+      <input class="input" id="busca" type="search" placeholder="Buscar por parceiro, cupom ou rótulo do período…" style="flex:1;min-width:200px" />
+      <select class="input" id="filtro-parceiro" style="width:auto">
+        <option value="">Todos os parceiros</option>
+        ${parceiros.filter((p) => p.ehParceiro).sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"))
+          .map((p) => `<option value="${esc(p.id)}">${esc(p.nome)} — ${esc(p.cupom)}</option>`).join("")}
+      </select>
+    </div>
+
+    <div class="list-card" id="lista"></div>
+  `;
+
+  const lista = app.querySelector("#lista");
+  const lPorId = Object.fromEntries(lancamentos.map((l) => [l.id, l]));
+
+  function desenhar() {
+    const termo = busca.trim().toLowerCase();
+    const arr = lancamentos.filter((l) => {
+      const p = porId[l.parceiroId];
+      const okBusca = !termo
+        || (p?.nome || "").toLowerCase().includes(termo)
+        || (p?.cupom || "").toLowerCase().includes(termo)
+        || (l.periodoLabel || "").toLowerCase().includes(termo);
+      const okParceiro = !filtroParceiro || l.parceiroId === filtroParceiro;
+      return okBusca && okParceiro;
+    }).sort((a, b) => (b.data || "").localeCompare(a.data || ""));
+
+    lista.innerHTML = arr.length
+      ? arr.map((l) => row(l, porId[l.parceiroId])).join("")
+      : `<div class="empty">Nenhum lançamento encontrado.</div>`;
+  }
+  desenhar();
+
+  app.querySelector("#busca").addEventListener("input", (e) => { busca = e.target.value; desenhar(); });
+  app.querySelector("#filtro-parceiro").addEventListener("change", (e) => { filtroParceiro = e.target.value; desenhar(); });
+
+  app.querySelector(".page-head .toolbar").addEventListener("click", (e) => {
+    if (e.target.closest("[data-act='lote']")) return abrirLancamentoLote();
+    if (e.target.closest("[data-act='avulso']")) return abrirNovoLancamento();
+  });
+
+  lista.addEventListener("click", async (e) => {
+    const id = e.target.dataset.id;
+    if (!id) return;
+    const l = lPorId[id];
+    if (!l) return;
+    if (e.target.dataset.action === "editar") return abrirNovoLancamento(l.parceiroId, l);
+    if (e.target.dataset.action === "excluir") {
+      if (!confirm("Excluir este lançamento?")) return;
+      await store.removeLancamento(id);
+      window.dispatchEvent(new CustomEvent("data-changed"));
+    }
+  });
+}
+
+function stat(num, label) {
+  return `<div class="stat">
+    <div class="stat-num">${num}</div>
+    <div class="stat-label">${esc(label)}</div>
+  </div>`;
+}
+
+function row(l, parceiro) {
+  const nomeParceiro = parceiro ? `${parceiro.nome} — ${parceiro.cupom}` : "(parceiro removido)";
+  return `<div class="list-row">
+    <div class="lr-main">
+      <div class="lr-title">${esc(nomeParceiro)}</div>
+      <div class="lr-sub">${esc(formatDataBR(l.data))}${l.periodoLabel ? ` · ${esc(l.periodoLabel)}` : ""} · ${l.quantidadeUso} usos · ${esc(formatMoeda(l.faturamentoCupom))} · ticket médio ${esc(formatMoeda(l.ticketMedio))}</div>
+    </div>
+    <span class="lr-actions">
+      <button class="icon-btn" data-action="editar" data-id="${esc(l.id)}" title="Editar">✎</button>
+      <button class="icon-btn danger" data-action="excluir" data-id="${esc(l.id)}" title="Excluir">🗑</button>
+    </span>
+  </div>`;
+}
