@@ -11,15 +11,15 @@
 //          salvos na máquina, sobrevivem a recarregar a página.
 //  true  → Firestore — sincroniza entre qualquer dispositivo que
 //          abrir o site (local ou publicado no GitHub Pages).
-export const USE_FIRESTORE = false;
+export const USE_FIRESTORE = true;
 
 export const firebaseConfig = {
-  apiKey: "COLOQUE_AQUI",
-  authDomain: "COLOQUE_AQUI.firebaseapp.com",
-  projectId: "COLOQUE_AQUI",
-  storageBucket: "COLOQUE_AQUI.firebasestorage.app",
-  messagingSenderId: "COLOQUE_AQUI",
-  appId: "COLOQUE_AQUI",
+  apiKey: "AIzaSyBxWrjxy0xIXUL5UhUWa9xYcXY4x3vKJMs",
+  authDomain: "vlm-c93c2.firebaseapp.com",
+  projectId: "vlm-c93c2",
+  storageBucket: "vlm-c93c2.firebasestorage.app",
+  messagingSenderId: "757670885042",
+  appId: "1:757670885042:web:6f22f3e6ebb943bbcb3bab",
 };
 
 /* Nomes das coleções (Firestore) + doc único de listas.
