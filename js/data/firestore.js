@@ -54,7 +54,6 @@ export const firestoreStore = {
     const snap = await getDoc(doc(fdb, COLLECTIONS.parceiros, id));
     return snap.exists() ? { id: snap.id, ...snap.data() } : null;
   },
-  async listProspeccao() { return docsWhere(COLLECTIONS.parceiros, "ehParceiro", false); },
   async listParceirosFechados() { return docsWhere(COLLECTIONS.parceiros, "ehParceiro", true); },
   async addParceiro(dados) {
     const novo = {

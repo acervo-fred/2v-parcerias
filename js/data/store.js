@@ -89,10 +89,6 @@ const localStore = {
     const p = db.parceiros.find((x) => x.id === id);
     return p ? structuredClone(p) : null;
   },
-  // ainda não fecharam parceria
-  async listProspeccao() {
-    return db.parceiros.filter((p) => !p.ehParceiro).map((p) => structuredClone(p));
-  },
   // já são parceiros ativos/fechados
   async listParceirosFechados() {
     return db.parceiros.filter((p) => p.ehParceiro).map((p) => structuredClone(p));

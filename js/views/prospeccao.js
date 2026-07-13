@@ -1,6 +1,7 @@
-/* Lista de Prospecção — negócios da área que ainda não fecharam parceria.
-   Busca, filtro por status e por tipo, e ação de "Fechar parceria"
-   que promove o registro pra Cadastro de Parceiros. */
+/* Lista de Prospecção — TODOS os negócios da área: os parceiros já
+   fechados (ehParceiro=true) e os que ainda estão em prospecção.
+   Busca, filtro por status, e ação de "Fechar parceria" (só nos que
+   ainda não fecharam) ou "Ver parceiro" (nos que já fecharam). */
 
 import { store } from "../data/store.js";
 import { esc } from "../ui/dom.js";
@@ -8,8 +9,8 @@ import { badgeFromLista } from "../ui/badges.js";
 import { abrirNovoProspecto, abrirFecharParceria } from "./cadastros.js";
 
 export async function renderProspeccao(app) {
-  const [prospectos, listas] = await Promise.all([
-    store.listProspeccao(),
+  const [negocios, listas] = await Promise.all([
+    store.listParceiros(),
     store.getListas(),
   ]);
 
@@ -20,7 +21,7 @@ export async function renderProspeccao(app) {
     <div class="page-head">
       <div>
         <h1 class="page-title">Prospecção</h1>
-        <div class="page-sub" id="contador">${prospectos.length} negócios prospectados</div>
+        <div class="page-sub" id="contador">${negocios.length} negócios</div>
       </div>
       <div class="toolbar">
         <button class="btn btn-primary" data-act="novo">+ Nova prospecção</button>
@@ -42,11 +43,11 @@ export async function renderProspeccao(app) {
     .join("");
 
   const lista = app.querySelector("#lista");
-  const porId = Object.fromEntries(prospectos.map((p) => [p.id, p]));
+  const porId = Object.fromEntries(negocios.map((p) => [p.id, p]));
 
   function desenhar() {
     const termo = busca.trim().toLowerCase();
-    const arr = prospectos.filter((p) => {
+    const arr = negocios.filter((p) => {
       const okBusca = !termo
         || p.nome.toLowerCase().includes(termo)
         || (p.local || "").toLowerCase().includes(termo)
@@ -60,7 +61,7 @@ export async function renderProspeccao(app) {
       ? arr.map((p) => row(p, listas)).join("")
       : `<div class="empty">Nenhum negócio encontrado.</div>`;
 
-    const rotulo = filtroStatus === "Todos" ? "negócios prospectados" : `negócios — ${filtroStatus}`;
+    const rotulo = filtroStatus === "Todos" ? "negócios" : `negócios — ${filtroStatus}`;
     app.querySelector("#contador").textContent = `${arr.length} ${rotulo}`;
   }
   desenhar();
@@ -96,14 +97,17 @@ export async function renderProspeccao(app) {
 
 function row(p, listas) {
   const partes = [p.tipo, p.local, p.responsavel, p.contato].filter(Boolean);
+  const acao = p.ehParceiro
+    ? `<a class="btn btn-sm btn-ghost" href="#/parceiro/${esc(p.id)}">Ver parceiro →</a>`
+    : `<button class="btn btn-sm btn-primary${p.statusProspeccao === "Ativo" ? " is-done" : ""}" data-action="fechar" data-id="${esc(p.id)}">Fechar parceria</button>`;
   return `<div class="list-row" data-id="${esc(p.id)}">
     <div class="lr-main">
       <div class="lr-title">${esc(p.nome)}</div>
       <div class="lr-sub">${esc(partes.join(" · "))}</div>
       ${p.observacoes ? `<div class="lr-sub">${esc(p.observacoes)}</div>` : ""}
     </div>
-    ${badgeFromLista(listas.statusProspeccao, p.statusProspeccao)}
-    <button class="btn btn-sm btn-primary${p.statusProspeccao === "Ativo" ? " is-done" : ""}" data-action="fechar" data-id="${esc(p.id)}">Fechar parceria</button>
+    ${p.ehParceiro ? `<span class="badge badge--green">✓ Parceiro</span>` : badgeFromLista(listas.statusProspeccao, p.statusProspeccao)}
+    ${acao}
     <span class="lr-actions">
       <button class="icon-btn" data-action="editar" data-id="${esc(p.id)}" title="Editar">✎</button>
       <button class="icon-btn danger" data-action="excluir" data-id="${esc(p.id)}" title="Excluir">🗑</button>
