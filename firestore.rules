@@ -1,0 +1,40 @@
+rules_version = '2';
+
+// ============================================================
+// Regras do Firestore — projeto dedicado ao 2V Parcerias
+// ============================================================
+// ⚠️ TEMPORÁRIAS (fase de desenvolvimento, SEM login). Liberam
+// leitura/escrita em todo o banco até a data de expiração abaixo.
+// Como o app fica no GitHub Pages (público) e a apiKey é visível,
+// estas regras NÃO protegem os dados — qualquer pessoa com a URL
+// poderia ler/gravar.
+//
+// ANTES de colocar dados sensíveis de verdade (contatos, valores),
+// troque pelo bloco "COM LOGIN" mais abaixo (Firebase Auth).
+// ============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // libera enquanto estiver dentro do prazo de desenvolvimento
+    function devAberto() {
+      return request.time < timestamp.date(2026, 12, 31);
+    }
+
+    match /parceiros/{document=**}    { allow read, write: if devAberto(); }
+    match /lancamentos/{document=**}  { allow read, write: if devAberto(); }
+    match /config/{document=**}       { allow read, write: if devAberto(); }
+
+    // Nada mais é exposto.
+  }
+}
+
+// ============================================================
+// VERSÃO COM LOGIN (usar quando ativarmos o Firebase Auth):
+//
+// match /databases/{database}/documents {
+//   match /{document=**} {
+//     allow read, write: if request.auth != null;
+//   }
+// }
+// ============================================================

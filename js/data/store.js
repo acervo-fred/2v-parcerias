@@ -1,8 +1,10 @@
 /* ============================================================
    Store — única fonte de acesso a dados das telas.
-   Persistência em localStorage (sem backend). Todos os métodos
-   são async de propósito (facilita trocar de backend depois sem
-   mudar as views — mesma lógica da Plataforma Giros Imagens).
+
+   Backend LOCAL (padrão): dados persistidos no localStorage do
+   navegador. Backend Firestore: opcional, ligado por USE_FIRESTORE
+   (js/config/firebase-config.js) — mesma lógica da Plataforma
+   Giros Imagens. Ambos implementam a MESMA API — as telas não mudam.
 
    Modelo: PARCEIROS é um único registro por negócio, que evolui de
    "prospecção" pra "parceiro fechado" (ehParceiro=true) quando ganha
@@ -12,6 +14,7 @@
    ============================================================ */
 
 import * as mock from "./mock.js";
+import { USE_FIRESTORE } from "../config/firebase-config.js";
 
 const LS_KEY = "2v-parcerias-db-v1";
 
@@ -71,7 +74,7 @@ function enrichLancamento(l) {
   };
 }
 
-export const store = {
+const localStore = {
   /* ---------- listas de configuração ---------- */
   async getListas() { return structuredClone(db.listas); },
   async saveLista(chave, valores) {
@@ -193,3 +196,21 @@ export const store = {
     persistir();
   },
 };
+
+/* ---------- Seleção de backend ----------
+   USE_FIRESTORE=false → local em localStorage (acima).
+   USE_FIRESTORE=true  → importa o backend Firestore dinamicamente
+   (assim o SDK do Firebase só é baixado quando realmente usado).
+   Os dois objetos implementam a MESMA API — as telas não mudam. */
+let store = localStore;
+if (USE_FIRESTORE) {
+  try {
+    const mod = await import("./firestore.js");
+    store = mod.firestoreStore;
+    console.info("Usando Firestore como backend.");
+  } catch (e) {
+    console.warn("Firestore indisponível — usando localStorage como fallback.", e);
+  }
+}
+
+export { store };

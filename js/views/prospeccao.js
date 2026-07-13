@@ -20,7 +20,7 @@ export async function renderProspeccao(app) {
     <div class="page-head">
       <div>
         <h1 class="page-title">Prospecção</h1>
-        <div class="page-sub">${prospectos.length} negócios em prospecção</div>
+        <div class="page-sub" id="contador">${prospectos.length} negócios prospectados</div>
       </div>
       <div class="toolbar">
         <button class="btn btn-primary" data-act="novo">+ Nova prospecção</button>
@@ -59,6 +59,9 @@ export async function renderProspeccao(app) {
     lista.innerHTML = arr.length
       ? arr.map((p) => row(p, listas)).join("")
       : `<div class="empty">Nenhum negócio encontrado.</div>`;
+
+    const rotulo = filtroStatus === "Todos" ? "negócios prospectados" : `negócios — ${filtroStatus}`;
+    app.querySelector("#contador").textContent = `${arr.length} ${rotulo}`;
   }
   desenhar();
 
@@ -100,7 +103,7 @@ function row(p, listas) {
       ${p.observacoes ? `<div class="lr-sub">${esc(p.observacoes)}</div>` : ""}
     </div>
     ${badgeFromLista(listas.statusProspeccao, p.statusProspeccao)}
-    <button class="btn btn-sm btn-primary" data-action="fechar" data-id="${esc(p.id)}">Fechar parceria</button>
+    <button class="btn btn-sm btn-primary${p.statusProspeccao === "Ativo" ? " is-done" : ""}" data-action="fechar" data-id="${esc(p.id)}">Fechar parceria</button>
     <span class="lr-actions">
       <button class="icon-btn" data-action="editar" data-id="${esc(p.id)}" title="Editar">✎</button>
       <button class="icon-btn danger" data-action="excluir" data-id="${esc(p.id)}" title="Excluir">🗑</button>

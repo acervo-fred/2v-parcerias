@@ -5,6 +5,7 @@ import { renderParceiros } from "./views/parceiros-list.js";
 import { renderParceiro } from "./views/parceiro.js";
 import { renderLancamentos } from "./views/lancamentos.js";
 import { renderDashboard } from "./views/dashboard.js";
+import { renderBackup } from "./views/backup.js";
 import { esc } from "./ui/dom.js";
 
 const app = document.getElementById("app");
@@ -47,6 +48,9 @@ async function router() {
       case "dashboard":
         setActiveNav("dashboard");
         await renderDashboard(app);
+        break;
+      case "backup":
+        await renderBackup(app);
         break;
       default:
         app.innerHTML = `<a class="back-link" href="#/">← Voltar</a>
