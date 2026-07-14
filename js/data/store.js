@@ -66,11 +66,22 @@ function remover(colecao, id) {
   return true;
 }
 
-// enriquece um lançamento com o ticket médio (derivado, nunca gravado)
+// enriquece um lançamento com campos derivados (nunca gravados) e faz
+// fallback pra registros antigos (campo único "data" e
+// "faturamentoTotalSemCupom") que ainda não foram regravados no
+// schema novo (dataInicio/dataFim + faturamentoTotal).
 function enrichLancamento(l) {
+  const faturamentoCupom = Number(l.faturamentoCupom) || 0;
+  const dataInicio = l.dataInicio || l.data || "";
+  const dataFim = l.dataFim || dataInicio;
+  const faturamentoTotal = l.faturamentoTotal !== undefined
+    ? Number(l.faturamentoTotal) || 0
+    : faturamentoCupom + (Number(l.faturamentoTotalSemCupom) || 0);
   return {
     ...l,
-    ticketMedio: l.quantidadeUso > 0 ? l.faturamentoCupom / l.quantidadeUso : 0,
+    dataInicio, dataFim, faturamentoCupom, faturamentoTotal,
+    faturamentoSemCupom: Math.max(0, faturamentoTotal - faturamentoCupom),
+    ticketMedio: l.quantidadeUso > 0 ? faturamentoCupom / l.quantidadeUso : 0,
   };
 }
 
@@ -128,7 +139,7 @@ const localStore = {
     return db.lancamentos
       .filter((l) => l.parceiroId === parceiroId)
       .map(enrichLancamento)
-      .sort((a, b) => (b.data || "").localeCompare(a.data || ""));
+      .sort((a, b) => (b.dataInicio || "").localeCompare(a.dataInicio || ""));
   },
   async listLancamentos() {
     return db.lancamentos.map(enrichLancamento);
@@ -137,12 +148,13 @@ const localStore = {
     const novo = {
       id: novoId("lz"),
       parceiroId: dados.parceiroId,
-      data: dados.data,
+      dataInicio: dados.dataInicio,
+      dataFim: dados.dataFim || dados.dataInicio,
       periodoTipo: dados.periodoTipo || "dia",
       periodoLabel: dados.periodoLabel || "",
       quantidadeUso: Number(dados.quantidadeUso) || 0,
       faturamentoCupom: Number(dados.faturamentoCupom) || 0,
-      faturamentoTotalSemCupom: Number(dados.faturamentoTotalSemCupom) || 0,
+      faturamentoTotal: Number(dados.faturamentoTotal) || 0,
       observacoes: dados.observacoes || "",
     };
     db.lancamentos.push(novo);
@@ -154,12 +166,13 @@ const localStore = {
     const novos = linhas.map((dados) => ({
       id: novoId("lz"),
       parceiroId: dados.parceiroId,
-      data: dados.data,
+      dataInicio: dados.dataInicio,
+      dataFim: dados.dataFim || dados.dataInicio,
       periodoTipo: dados.periodoTipo || "dia",
       periodoLabel: dados.periodoLabel || "",
       quantidadeUso: Number(dados.quantidadeUso) || 0,
       faturamentoCupom: Number(dados.faturamentoCupom) || 0,
-      faturamentoTotalSemCupom: Number(dados.faturamentoTotalSemCupom) || 0,
+      faturamentoTotal: Number(dados.faturamentoTotal) || 0,
       observacoes: dados.observacoes || "",
     }));
     db.lancamentos.push(...novos);
@@ -173,7 +186,7 @@ const localStore = {
       ...campos,
       quantidadeUso: campos.quantidadeUso !== undefined ? Number(campos.quantidadeUso) : l.quantidadeUso,
       faturamentoCupom: campos.faturamentoCupom !== undefined ? Number(campos.faturamentoCupom) : l.faturamentoCupom,
-      faturamentoTotalSemCupom: campos.faturamentoTotalSemCupom !== undefined ? Number(campos.faturamentoTotalSemCupom) : l.faturamentoTotalSemCupom,
+      faturamentoTotal: campos.faturamentoTotal !== undefined ? Number(campos.faturamentoTotal) : l.faturamentoTotal,
     });
     persistir();
     return enrichLancamento(l);

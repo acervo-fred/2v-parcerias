@@ -78,10 +78,10 @@ export function openModal(opts) {
 
 /* ---------- helpers de campo (HTML) ---------- */
 
-export function fieldText(name, label, { value = "", type = "text", hint = "", required = false, placeholder = "" } = {}) {
+export function fieldText(name, label, { value = "", type = "text", hint = "", required = false, placeholder = "", disabled = false } = {}) {
   return `<div class="field">
     <label for="f_${name}">${esc(label)}${required ? " *" : ""}</label>
-    <input type="${type}" id="f_${name}" name="${name}" value="${esc(value)}" placeholder="${esc(placeholder)}" />
+    <input type="${type}" id="f_${name}" name="${name}" value="${esc(value)}" placeholder="${esc(placeholder)}" ${disabled ? "disabled" : ""} />
     ${hint ? `<div class="field-hint">${esc(hint)}</div>` : ""}
   </div>`;
 }

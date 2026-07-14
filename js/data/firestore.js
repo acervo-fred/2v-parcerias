@@ -32,7 +32,18 @@ async function docsWhere(coll, campo, valor) {
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
 function enrichLancamento(l) {
-  return { ...l, ticketMedio: l.quantidadeUso > 0 ? l.faturamentoCupom / l.quantidadeUso : 0 };
+  const faturamentoCupom = Number(l.faturamentoCupom) || 0;
+  const dataInicio = l.dataInicio || l.data || "";
+  const dataFim = l.dataFim || dataInicio;
+  const faturamentoTotal = l.faturamentoTotal !== undefined
+    ? Number(l.faturamentoTotal) || 0
+    : faturamentoCupom + (Number(l.faturamentoTotalSemCupom) || 0);
+  return {
+    ...l,
+    dataInicio, dataFim, faturamentoCupom, faturamentoTotal,
+    faturamentoSemCupom: Math.max(0, faturamentoTotal - faturamentoCupom),
+    ticketMedio: l.quantidadeUso > 0 ? faturamentoCupom / l.quantidadeUso : 0,
+  };
 }
 function numOrZero(v) { return Number(v) || 0; }
 
@@ -85,7 +96,7 @@ export const firestoreStore = {
   /* ---------- LANÇAMENTOS (Base de Dados) ---------- */
   async lancamentosDoParceiro(parceiroId) {
     const lancs = await docsWhere(COLLECTIONS.lancamentos, "parceiroId", parceiroId);
-    return lancs.map(enrichLancamento).sort((a, b) => (b.data || "").localeCompare(a.data || ""));
+    return lancs.map(enrichLancamento).sort((a, b) => (b.dataInicio || "").localeCompare(a.dataInicio || ""));
   },
   async listLancamentos() {
     const lancs = await allDocs(COLLECTIONS.lancamentos);
@@ -93,10 +104,10 @@ export const firestoreStore = {
   },
   async addLancamento(dados) {
     const novo = {
-      parceiroId: dados.parceiroId, data: dados.data,
+      parceiroId: dados.parceiroId, dataInicio: dados.dataInicio, dataFim: dados.dataFim || dados.dataInicio,
       periodoTipo: dados.periodoTipo || "dia", periodoLabel: dados.periodoLabel || "",
       quantidadeUso: numOrZero(dados.quantidadeUso), faturamentoCupom: numOrZero(dados.faturamentoCupom),
-      faturamentoTotalSemCupom: numOrZero(dados.faturamentoTotalSemCupom), observacoes: dados.observacoes || "",
+      faturamentoTotal: numOrZero(dados.faturamentoTotal), observacoes: dados.observacoes || "",
     };
     const ref = await addDoc(collection(fdb, COLLECTIONS.lancamentos), novo);
     return enrichLancamento({ id: ref.id, ...novo });
@@ -104,10 +115,10 @@ export const firestoreStore = {
   async addLancamentosLote(linhas) {
     const novos = await Promise.all(linhas.map(async (dados) => {
       const novo = {
-        parceiroId: dados.parceiroId, data: dados.data,
+        parceiroId: dados.parceiroId, dataInicio: dados.dataInicio, dataFim: dados.dataFim || dados.dataInicio,
         periodoTipo: dados.periodoTipo || "dia", periodoLabel: dados.periodoLabel || "",
         quantidadeUso: numOrZero(dados.quantidadeUso), faturamentoCupom: numOrZero(dados.faturamentoCupom),
-        faturamentoTotalSemCupom: numOrZero(dados.faturamentoTotalSemCupom), observacoes: dados.observacoes || "",
+        faturamentoTotal: numOrZero(dados.faturamentoTotal), observacoes: dados.observacoes || "",
       };
       const ref = await addDoc(collection(fdb, COLLECTIONS.lancamentos), novo);
       return { id: ref.id, ...novo };
@@ -123,7 +134,7 @@ export const firestoreStore = {
       ...atual, ...campos,
       quantidadeUso: campos.quantidadeUso !== undefined ? numOrZero(campos.quantidadeUso) : atual.quantidadeUso,
       faturamentoCupom: campos.faturamentoCupom !== undefined ? numOrZero(campos.faturamentoCupom) : atual.faturamentoCupom,
-      faturamentoTotalSemCupom: campos.faturamentoTotalSemCupom !== undefined ? numOrZero(campos.faturamentoTotalSemCupom) : atual.faturamentoTotalSemCupom,
+      faturamentoTotal: campos.faturamentoTotal !== undefined ? numOrZero(campos.faturamentoTotal) : atual.faturamentoTotal,
     };
     await updateDoc(ref, merged);
     return enrichLancamento({ id, ...merged });

@@ -99,7 +99,7 @@ function row(p, listas) {
   const partes = [p.tipo, p.local, p.responsavel, p.contato].filter(Boolean);
   const acao = p.ehParceiro
     ? `<a class="btn btn-sm btn-ghost" href="#/parceiro/${esc(p.id)}">Ver parceiro →</a>`
-    : `<button class="btn btn-sm btn-primary${p.statusProspeccao === "Ativo" ? " is-done" : ""}" data-action="fechar" data-id="${esc(p.id)}">Fechar parceria</button>`;
+    : `<button class="btn btn-sm btn-primary" data-action="fechar" data-id="${esc(p.id)}">Fechar parceria</button>`;
   return `<div class="list-row" data-id="${esc(p.id)}">
     <div class="lr-main">
       <div class="lr-title">${esc(p.nome)}</div>

@@ -31,11 +31,11 @@ export async function renderParceiro(app, id) {
 
   const totalUso = lancamentos.reduce((s, l) => s + l.quantidadeUso, 0);
   const totalCupom = lancamentos.reduce((s, l) => s + l.faturamentoCupom, 0);
-  const totalSemCupom = lancamentos.reduce((s, l) => s + l.faturamentoTotalSemCupom, 0);
+  const totalSemCupom = lancamentos.reduce((s, l) => s + l.faturamentoSemCupom, 0);
   const ticketMedioGeral = totalUso > 0 ? totalCupom / totalUso : 0;
 
   // comparação: lançamento mais recente vs. o imediatamente anterior
-  const porData = [...lancamentos].sort((a, b) => (b.data || "").localeCompare(a.data || ""));
+  const porData = [...lancamentos].sort((a, b) => (b.dataInicio || "").localeCompare(a.dataInicio || ""));
   const atual = porData[0], anterior = porData[1];
   const comparavel = Boolean(atual && anterior);
   const deltaUso = comparavel ? pctDelta(atual.quantidadeUso, anterior.quantidadeUso) : undefined;
@@ -44,8 +44,8 @@ export async function renderParceiro(app, id) {
 
   // evolução: um ponto por lançamento, do mais antigo ao mais recente
   const pontosEvolucao = [...lancamentos]
-    .sort((a, b) => (a.data || "").localeCompare(b.data || ""))
-    .map((l) => ({ label: l.periodoLabel || formatDataBR(l.data), value: l.faturamentoCupom }));
+    .sort((a, b) => (a.dataInicio || "").localeCompare(b.dataInicio || ""))
+    .map((l) => ({ label: l.periodoLabel || formatDataBR(l.dataInicio), value: l.faturamentoCupom }));
 
   app.innerHTML = `
     <a class="back-link" href="#/parceiros">← Voltar para parceiros</a>
@@ -92,8 +92,8 @@ export async function renderParceiro(app, id) {
       <div class="section-head"><h2>Último período vs. anterior</h2></div>
       ${comparavel ? `
         <div class="note"><span class="note-i">ⓘ</span>
-          Comparando <strong>${esc(atual.periodoLabel || formatDataBR(atual.data))}</strong> com
-          <strong>${esc(anterior.periodoLabel || formatDataBR(anterior.data))}</strong>.</div>
+          Comparando <strong>${esc(atual.periodoLabel || formatDataBR(atual.dataInicio))}</strong> com
+          <strong>${esc(anterior.periodoLabel || formatDataBR(anterior.dataInicio))}</strong>.</div>
         <div class="stat-grid">
           ${stat(atual.quantidadeUso, "Usos no último período", deltaUso)}
           ${stat(formatMoeda(atual.faturamentoCupom), "Faturamento no último período", deltaFat)}
@@ -297,10 +297,13 @@ function wireMiniLineChartHover(container, pontos, formatValue) {
 
 function lancamentoRow(l) {
   const rotulo = l.periodoLabel || PERIODO_LABEL[l.periodoTipo] || "";
+  const periodo = l.dataInicio === l.dataFim || !l.dataFim
+    ? formatDataBR(l.dataInicio)
+    : `${formatDataBR(l.dataInicio)} – ${formatDataBR(l.dataFim)}`;
   return `<div class="list-row">
     <div class="lr-main">
-      <div class="lr-title">${esc(formatDataBR(l.data))} ${rotulo ? `<span class="muted" style="font-weight:400">· ${esc(rotulo)}</span>` : ""}</div>
-      <div class="lr-sub">${l.quantidadeUso} usos · ${esc(formatMoeda(l.faturamentoCupom))} no cupom · ticket médio ${esc(formatMoeda(l.ticketMedio))}</div>
+      <div class="lr-title">${esc(periodo)} ${rotulo ? `<span class="muted" style="font-weight:400">· ${esc(rotulo)}</span>` : ""}</div>
+      <div class="lr-sub">${l.quantidadeUso} usos · ${esc(formatMoeda(l.faturamentoCupom))} via cupom · ${esc(formatMoeda(l.faturamentoTotal))} faturamento total · ticket médio ${esc(formatMoeda(l.ticketMedio))}</div>
       ${l.observacoes ? `<div class="lr-sub">${esc(l.observacoes)}</div>` : ""}
     </div>
     <span class="lr-actions">

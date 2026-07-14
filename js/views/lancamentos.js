@@ -63,7 +63,7 @@ export async function renderLancamentos(app) {
         || (l.periodoLabel || "").toLowerCase().includes(termo);
       const okParceiro = !filtroParceiro || l.parceiroId === filtroParceiro;
       return okBusca && okParceiro;
-    }).sort((a, b) => (b.data || "").localeCompare(a.data || ""));
+    }).sort((a, b) => (b.dataInicio || "").localeCompare(a.dataInicio || ""));
 
     lista.innerHTML = arr.length
       ? arr.map((l) => row(l, porId[l.parceiroId])).join("")
@@ -102,10 +102,13 @@ function stat(num, label) {
 
 function row(l, parceiro) {
   const nomeParceiro = parceiro ? `${parceiro.nome} — ${parceiro.cupom}` : "(parceiro removido)";
+  const periodo = l.dataInicio === l.dataFim || !l.dataFim
+    ? formatDataBR(l.dataInicio)
+    : `${formatDataBR(l.dataInicio)} – ${formatDataBR(l.dataFim)}`;
   return `<div class="list-row">
     <div class="lr-main">
       <div class="lr-title">${esc(nomeParceiro)}</div>
-      <div class="lr-sub">${esc(formatDataBR(l.data))}${l.periodoLabel ? ` · ${esc(l.periodoLabel)}` : ""} · ${l.quantidadeUso} usos · ${esc(formatMoeda(l.faturamentoCupom))} · ticket médio ${esc(formatMoeda(l.ticketMedio))}</div>
+      <div class="lr-sub">${esc(periodo)}${l.periodoLabel ? ` · ${esc(l.periodoLabel)}` : ""} · ${l.quantidadeUso} usos · ${esc(formatMoeda(l.faturamentoCupom))} via cupom · ${esc(formatMoeda(l.faturamentoTotal))} faturamento total · ticket médio ${esc(formatMoeda(l.ticketMedio))}</div>
     </div>
     <span class="lr-actions">
       <button class="icon-btn" data-action="editar" data-id="${esc(l.id)}" title="Editar">✎</button>

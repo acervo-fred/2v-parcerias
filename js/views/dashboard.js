@@ -16,6 +16,7 @@
 
 import { store } from "../data/store.js";
 import { esc, formatMoeda } from "../ui/dom.js";
+import { lancamentoNoPeriodo } from "../util/periodo.js";
 
 const MES_NOMES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
 const TOP_N_CUPONS = 8;
@@ -311,7 +312,7 @@ function formatDataBRlocal(iso) {
 
 /* ---------- agregações ---------- */
 function filtrarPeriodo(lancamentos, de, ate) {
-  return lancamentos.filter((l) => (!de || l.data >= de) && (!ate || l.data <= ate));
+  return lancamentos.filter((l) => lancamentoNoPeriodo(l, de, ate));
 }
 function filtrarDimensoes(lancamentos, porId, { parceiroId, tipo }) {
   if (!parceiroId && !tipo) return lancamentos;
@@ -333,7 +334,7 @@ function agregarPorParceiro(lista) {
     const a = mapa.get(l.parceiroId);
     a.uso += l.quantidadeUso;
     a.fatCupom += l.faturamentoCupom;
-    a.fatSemCupom += l.faturamentoTotalSemCupom;
+    a.fatSemCupom += l.faturamentoSemCupom;
   }
   return mapa;
 }
@@ -370,7 +371,7 @@ function deltaInlineHtml(delta) {
 function calcularResumo(lista) {
   const totalUso = lista.reduce((s, l) => s + l.quantidadeUso, 0);
   const totalCupom = lista.reduce((s, l) => s + l.faturamentoCupom, 0);
-  const totalSemCupom = lista.reduce((s, l) => s + l.faturamentoTotalSemCupom, 0);
+  const totalSemCupom = lista.reduce((s, l) => s + l.faturamentoSemCupom, 0);
   const totalGeral = totalCupom + totalSemCupom;
   const pctCupom = totalGeral > 0 ? (totalCupom / totalGeral) * 100 : 0;
   const ticketMedio = totalUso > 0 ? totalCupom / totalUso : 0;
@@ -396,7 +397,7 @@ function stat(num, label, delta) {
 /* ---------- render: rosca (donut) — cupom vs faturamento total ---------- */
 function desenharDonutCupom(app, doPeriodo) {
   const totalCupom = doPeriodo.reduce((s, l) => s + l.faturamentoCupom, 0);
-  const totalSemCupom = doPeriodo.reduce((s, l) => s + l.faturamentoTotalSemCupom, 0);
+  const totalSemCupom = doPeriodo.reduce((s, l) => s + l.faturamentoSemCupom, 0);
   const totalGeral = totalCupom + totalSemCupom;
   const pct = totalGeral > 0 ? (totalCupom / totalGeral) * 100 : 0;
 
@@ -574,7 +575,7 @@ function tabelaRowHtml(l) {
 function desenharChartMes(app, lancamentosDim) {
   const porMes = new Map();
   for (const l of lancamentosDim) {
-    const mes = (l.data || "").slice(0, 7);
+    const mes = (l.dataInicio || "").slice(0, 7);
     if (!mes) continue;
     porMes.set(mes, (porMes.get(mes) || 0) + l.faturamentoCupom);
   }
@@ -607,7 +608,7 @@ function desenharChartMes(app, lancamentosDim) {
 function desenharChartUsoMensal(app, lancamentosDim) {
   const porMes = new Map();
   for (const l of lancamentosDim) {
-    const mes = (l.data || "").slice(0, 7);
+    const mes = (l.dataInicio || "").slice(0, 7);
     if (!mes) continue;
     porMes.set(mes, (porMes.get(mes) || 0) + l.quantidadeUso);
   }
@@ -736,21 +737,21 @@ function compareColHtml(id, parceiros, de, ate) {
 }
 
 function calcularAgregado(lancamentos, parceiroId, de, ate) {
-  const filtrado = lancamentos.filter((l) => l.parceiroId === parceiroId && (!de || l.data >= de) && (!ate || l.data <= ate));
+  const filtrado = lancamentos.filter((l) => l.parceiroId === parceiroId && lancamentoNoPeriodo(l, de, ate));
   const uso = filtrado.reduce((s, l) => s + l.quantidadeUso, 0);
   const fat = filtrado.reduce((s, l) => s + l.faturamentoCupom, 0);
   return { uso, fat, ticket: uso > 0 ? fat / uso : 0 };
 }
 function totalCupomNoPeriodo(lancamentos, de, ate) {
   return lancamentos
-    .filter((l) => (!de || l.data >= de) && (!ate || l.data <= ate))
+    .filter((l) => lancamentoNoPeriodo(l, de, ate))
     .reduce((s, l) => s + l.faturamentoCupom, 0);
 }
 function serieMensal(lancamentos, parceiroId, de, ate) {
-  const filtrado = lancamentos.filter((l) => l.parceiroId === parceiroId && (!de || l.data >= de) && (!ate || l.data <= ate));
+  const filtrado = lancamentos.filter((l) => l.parceiroId === parceiroId && lancamentoNoPeriodo(l, de, ate));
   const mapa = new Map();
   for (const l of filtrado) {
-    const mes = (l.data || "").slice(0, 7);
+    const mes = (l.dataInicio || "").slice(0, 7);
     if (!mes) continue;
     mapa.set(mes, (mapa.get(mes) || 0) + l.faturamentoCupom);
   }

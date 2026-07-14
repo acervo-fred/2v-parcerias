@@ -4,15 +4,43 @@
 import { store } from "../data/store.js";
 import { esc } from "../ui/dom.js";
 import { openModal, fieldText, fieldTextarea, fieldSelect, readValue } from "../ui/modal.js";
+import { PERIODO_TIPOS, PERIODO_MAP, rotuloTipoAtual, calcularDataFim, calcularRotulo } from "../util/periodo.js";
 
 function avisarMudanca() {
   window.dispatchEvent(new CustomEvent("data-changed"));
 }
 
-const PERIODO_TIPOS = ["Dia", "Semana", "Mês", "Personalizado"];
-const PERIODO_MAP = { Dia: "dia", Semana: "semana", "Mês": "mes", Personalizado: "personalizado" };
-function periodoLabelAtual(tipo) {
-  return Object.entries(PERIODO_MAP).find(([, v]) => v === tipo)?.[0] || "Semana";
+/* Wireia o trio Tipo de período + Início + Fim + Rótulo dentro de um
+   form já montado: o fim é auto-calculado a partir do tipo+início
+   (exceto Personalizado, que o usuário escolhe à mão), e o rótulo
+   sempre acompanha o tipo/intervalo atual. */
+function wirePeriodo(form) {
+  const tipoEl = form.elements["periodoTipo"];
+  const iniEl = form.elements["dataInicio"];
+  const fimEl = form.elements["dataFim"];
+  const labelEl = form.elements["periodoLabel"];
+
+  function tipoAtual() { return PERIODO_MAP[tipoEl.value] || "dia"; }
+
+  function atualizarFim() {
+    const tipo = tipoAtual();
+    if (tipo === "personalizado") {
+      fimEl.disabled = false;
+      if (!fimEl.value) fimEl.value = iniEl.value;
+    } else {
+      fimEl.value = calcularDataFim(tipo, iniEl.value);
+      fimEl.disabled = true;
+    }
+  }
+  function atualizarLabel() {
+    labelEl.value = calcularRotulo(tipoAtual(), iniEl.value, fimEl.value);
+  }
+  function recalcularTudo() { atualizarFim(); atualizarLabel(); }
+
+  tipoEl.addEventListener("change", recalcularTudo);
+  iniEl.addEventListener("change", recalcularTudo);
+  fimEl.addEventListener("change", atualizarLabel);
+  recalcularTudo();
 }
 
 /* ---------------- Prospecção (criar / editar dados-base) ---------------- */
@@ -167,36 +195,43 @@ export async function abrirNovoLancamento(parceiroIdSugerido = "", existente = n
   const l = existente || {};
   const parceiroSel = l.parceiroId || parceiroIdSugerido || parceiros[0].id;
 
+  const dataInicioIni = l.dataInicio || l.data || new Date().toISOString().slice(0, 10);
+
   openModal({
     title: ed ? "Editar lançamento" : "Novo lançamento",
     submitLabel: ed ? "Salvar alterações" : "Adicionar",
     bodyHtml: `
       ${selectParceiroHtml(parceiros, parceiroSel)}
+      ${fieldSelect("periodoTipo", "Tipo de período (duração)", PERIODO_TIPOS, { value: rotuloTipoAtual(l.periodoTipo) })}
       <div class="field-2col">
-        ${fieldText("data", "Data de referência", { type: "date", required: true, value: l.data || new Date().toISOString().slice(0, 10) })}
-        ${fieldSelect("periodoTipo", "Tipo de período", PERIODO_TIPOS, { value: periodoLabelAtual(l.periodoTipo) })}
+        ${fieldText("dataInicio", "Início do período", { type: "date", required: true, value: dataInicioIni })}
+        ${fieldText("dataFim", "Fim do período", { type: "date", required: true, value: l.dataFim || dataInicioIni })}
       </div>
-      ${fieldText("periodoLabel", "Rótulo do período", { value: l.periodoLabel || "", placeholder: "Ex.: Semana 27, Julho/2026, 01–07/07" })}
+      ${fieldText("periodoLabel", "Rótulo do período", { value: l.periodoLabel || "", hint: "Preenchido automaticamente a partir do tipo e das datas — pode editar se quiser." })}
       <div class="field-2col">
         ${fieldText("quantidadeUso", "Qtd. de uso do cupom", { type: "number", required: true, value: l.quantidadeUso ?? "" })}
-        ${fieldText("faturamentoCupom", "Faturamento do cupom (R$)", { type: "number", required: true, value: l.faturamentoCupom ?? "" })}
+        ${fieldText("faturamentoCupom", "Faturamento via cupom (R$)", { type: "number", required: true, value: l.faturamentoCupom ?? "" })}
       </div>
-      ${fieldText("faturamentoTotalSemCupom", "Faturamento total da loja no período, sem cupom (R$)", { type: "number", value: l.faturamentoTotalSemCupom || "", hint: "Opcional — permite comparar o quanto o cupom representa do faturamento total." })}
+      ${fieldText("faturamentoTotal", "Faturamento total da loja no período (R$)", { type: "number", required: true, value: l.faturamentoTotal ?? "", hint: "Tudo que a loja faturou no período, incluindo o que veio do cupom. O quanto foi sem cupom é calculado sozinho." })}
       ${fieldTextarea("observacoes", "Observações", { value: l.observacoes || "" })}
     `,
+    onMount: (form) => wirePeriodo(form),
     onSubmit: async (form) => {
-      const data = readValue(form, "data");
+      const dataInicio = readValue(form, "dataInicio");
+      const dataFim = readValue(form, "dataFim");
       const parceiroId = readValue(form, "parceiroId");
-      if (!data) throw new Error("Informe a data de referência.");
+      if (!dataInicio) throw new Error("Informe o início do período.");
+      if (!dataFim) throw new Error("Informe o fim do período.");
       if (!parceiroId) throw new Error("Selecione o parceiro/cupom.");
       const campos = {
         parceiroId,
-        data,
+        dataInicio,
+        dataFim,
         periodoTipo: PERIODO_MAP[readValue(form, "periodoTipo")] || "dia",
         periodoLabel: readValue(form, "periodoLabel"),
         quantidadeUso: readValue(form, "quantidadeUso"),
         faturamentoCupom: readValue(form, "faturamentoCupom"),
-        faturamentoTotalSemCupom: readValue(form, "faturamentoTotalSemCupom"),
+        faturamentoTotal: readValue(form, "faturamentoTotal"),
         observacoes: readValue(form, "observacoes"),
       };
       if (ed) await store.updateLancamento(l.id, campos);
@@ -217,7 +252,8 @@ function loteRowHtml(parceiros, valores = {}) {
   return `<div class="lote-row" data-row>
     <select class="input lote-parceiro">${opts}</select>
     <input class="input lote-uso" type="number" min="0" placeholder="Uso" value="${valores.quantidadeUso ?? ""}">
-    <input class="input lote-fat" type="number" min="0" step="0.01" placeholder="Faturamento (R$)" value="${valores.faturamentoCupom ?? ""}">
+    <input class="input lote-fat" type="number" min="0" step="0.01" placeholder="Faturamento cupom (R$)" value="${valores.faturamentoCupom ?? ""}">
+    <input class="input lote-total" type="number" min="0" step="0.01" placeholder="Faturamento total (R$)" value="${valores.faturamentoTotal ?? ""}">
     <button type="button" class="icon-btn danger lote-remove" title="Remover linha">🗑</button>
   </div>`;
 }
@@ -229,6 +265,7 @@ export async function abrirLancamentoLote() {
     return;
   }
   const linhasIniciais = Math.min(4, parceiros.length);
+  const hoje = new Date().toISOString().slice(0, 10);
 
   openModal({
     title: "Lançamento em lote",
@@ -236,14 +273,14 @@ export async function abrirLancamentoLote() {
     submitLabel: "Adicionar lançamentos",
     wide: true,
     bodyHtml: `
+      ${fieldSelect("periodoTipo", "Tipo de período (duração)", PERIODO_TIPOS, { value: "Semana" })}
       <div class="field-2col">
-        ${fieldText("data", "Data de referência do período", { type: "date", required: true, value: new Date().toISOString().slice(0, 10) })}
-        ${fieldSelect("periodoTipo", "Tipo de período", PERIODO_TIPOS, { value: "Semana" })}
+        ${fieldText("dataInicio", "Início do período", { type: "date", required: true, value: hoje })}
+        ${fieldText("dataFim", "Fim do período", { type: "date", required: true, value: hoje })}
       </div>
-      ${fieldText("periodoLabel", "Rótulo do período", { placeholder: "Ex.: Semana 27, Julho/2026, 01–07/07" })}
-      <div class="field-hint" style="margin-bottom:10px">Faturamento total sem cupom fica de fora aqui — lance depois, avulso, se precisar dessa comparação num cupom específico.</div>
+      ${fieldText("periodoLabel", "Rótulo do período", { hint: "Preenchido automaticamente a partir do tipo e das datas — pode editar se quiser." })}
       <div class="field">
-        <label>Cupons do período</label>
+        <label>Cupons do período — uso, faturamento via cupom e faturamento total de cada loja</label>
         <div id="lote-rows">
           ${Array.from({ length: linhasIniciais }).map(() => loteRowHtml(parceiros)).join("")}
         </div>
@@ -251,6 +288,7 @@ export async function abrirLancamentoLote() {
       </div>
     `,
     onMount: (form) => {
+      wirePeriodo(form);
       const container = form.querySelector("#lote-rows");
       form.querySelector("#lote-add").addEventListener("click", () => {
         const wrap = document.createElement("div");
@@ -265,8 +303,10 @@ export async function abrirLancamentoLote() {
       });
     },
     onSubmit: async (form) => {
-      const data = readValue(form, "data");
-      if (!data) throw new Error("Informe a data de referência do período.");
+      const dataInicio = readValue(form, "dataInicio");
+      const dataFim = readValue(form, "dataFim");
+      if (!dataInicio) throw new Error("Informe o início do período.");
+      if (!dataFim) throw new Error("Informe o fim do período.");
       const periodoTipo = PERIODO_MAP[readValue(form, "periodoTipo")] || "dia";
       const periodoLabel = readValue(form, "periodoLabel");
 
@@ -275,8 +315,9 @@ export async function abrirLancamentoLote() {
         const parceiroId = row.querySelector(".lote-parceiro").value;
         const quantidadeUso = row.querySelector(".lote-uso").value;
         const faturamentoCupom = row.querySelector(".lote-fat").value;
-        if (!parceiroId || (!quantidadeUso && !faturamentoCupom)) return;
-        linhas.push({ parceiroId, data, periodoTipo, periodoLabel, quantidadeUso, faturamentoCupom, faturamentoTotalSemCupom: 0 });
+        const faturamentoTotal = row.querySelector(".lote-total").value;
+        if (!parceiroId || (!quantidadeUso && !faturamentoCupom && !faturamentoTotal)) return;
+        linhas.push({ parceiroId, dataInicio, dataFim, periodoTipo, periodoLabel, quantidadeUso, faturamentoCupom, faturamentoTotal });
       });
       if (!linhas.length) throw new Error("Preencha ao menos uma linha com uso ou faturamento.");
 
