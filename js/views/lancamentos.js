@@ -61,12 +61,13 @@ export async function renderLancamentos(app) {
       const okBusca = !termo
         || (p?.nome || "").toLowerCase().includes(termo)
         || (p?.cupom || "").toLowerCase().includes(termo)
-        || (l.periodoLabel || "").toLowerCase().includes(termo);
+        || (l.periodoLabel || "").toLowerCase().includes(termo)
+        || (!l.parceiroId && "faturamento da loja".includes(termo));
       const okParceiro = !filtroParceiro || l.parceiroId === filtroParceiro;
       return okBusca && okParceiro;
     }).sort((a, b) => {
-      const nomeA = porId[a.parceiroId]?.nome || "";
-      const nomeB = porId[b.parceiroId]?.nome || "";
+      const nomeA = a.parceiroId ? (porId[a.parceiroId]?.nome || "") : "Faturamento da loja";
+      const nomeB = b.parceiroId ? (porId[b.parceiroId]?.nome || "") : "Faturamento da loja";
       return nomeA.localeCompare(nomeB, "pt-BR") || (a.dataInicio || "").localeCompare(b.dataInicio || "");
     });
 
@@ -90,7 +91,9 @@ export async function renderLancamentos(app) {
     if (!id) return;
     const l = lPorId[id];
     if (!l) return;
-    if (e.target.dataset.action === "editar") return abrirNovoLancamento(l.parceiroId, l);
+    if (e.target.dataset.action === "editar") {
+      return l.parceiroId ? abrirNovoLancamento(l.parceiroId, l) : abrirFaturamentoLoja(l);
+    }
     if (e.target.dataset.action === "excluir") {
       if (!confirm("Excluir este lançamento?")) return;
       await store.removeLancamento(id);
@@ -107,14 +110,19 @@ function stat(num, label) {
 }
 
 function row(l, parceiro) {
-  const nomeParceiro = parceiro ? `${parceiro.nome} — ${parceiro.cupom}` : "(parceiro removido)";
   const periodo = l.dataInicio === l.dataFim || !l.dataFim
     ? formatDataBR(l.dataInicio)
     : `${formatDataBR(l.dataInicio)} – ${formatDataBR(l.dataFim)}`;
+  const sub = !l.parceiroId
+    ? `${periodo}${l.periodoLabel ? ` · ${l.periodoLabel}` : ""} · ${formatMoeda(l.faturamentoTotal)} faturamento total${l.faturamentoDelivery ? ` · ${formatMoeda(l.faturamentoDelivery)} via delivery` : ""}`
+    : `${periodo}${l.periodoLabel ? ` · ${l.periodoLabel}` : ""} · ${l.quantidadeUso} usos · ${formatMoeda(l.faturamentoCupom)} via cupom · ${formatMoeda(l.faturamentoTotal)} faturamento total${l.faturamentoDelivery ? ` · ${formatMoeda(l.faturamentoDelivery)} via delivery` : ""} · ticket médio ${formatMoeda(l.ticketMedio)}`;
+  const nomeParceiro = !l.parceiroId
+    ? "Faturamento da loja"
+    : parceiro ? `${parceiro.cupom} — ${parceiro.nome}` : "(parceiro removido)";
   return `<div class="list-row">
     <div class="lr-main">
       <div class="lr-title">${esc(nomeParceiro)}</div>
-      <div class="lr-sub">${esc(periodo)}${l.periodoLabel ? ` · ${esc(l.periodoLabel)}` : ""} · ${l.quantidadeUso} usos · ${esc(formatMoeda(l.faturamentoCupom))} via cupom · ${esc(formatMoeda(l.faturamentoTotal))} faturamento total${l.faturamentoDelivery ? ` · ${esc(formatMoeda(l.faturamentoDelivery))} via delivery` : ""} · ticket médio ${esc(formatMoeda(l.ticketMedio))}</div>
+      <div class="lr-sub">${esc(sub)}</div>
     </div>
     <span class="lr-actions">
       <button class="icon-btn" data-action="editar" data-id="${esc(l.id)}" title="Editar">✎</button>

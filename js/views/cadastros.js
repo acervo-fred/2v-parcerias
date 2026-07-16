@@ -315,33 +315,27 @@ function loteRowHtml(parceiros, valores = {}) {
 }
 
 /* ---------------- Faturamento da loja (avulso, sem cupom) ----------------
-   Valor agregado de faturamento total do período (ex.: "FAT. LOJA" do
-   relatório), sem vínculo com um cupom/parceiro específico. Gravado como
-   um lançamento comum, num parceiro-bucket dedicado ("Loja (faturamento
-   total)", cupom LOJA-TOTAL), criado sob demanda na primeira vez. */
-const CUPOM_LOJA_TOTAL = "LOJA-TOTAL";
-async function parceiroLojaTotal() {
-  const existente = (await store.listParceirosFechados()).find((p) => p.cupom === CUPOM_LOJA_TOTAL);
-  if (existente) return existente;
-  const novo = await store.addParceiro({ nome: "Loja (faturamento total)", statusProspeccao: "Cadastrado" });
-  return store.fecharParceria(novo.id, { cupom: CUPOM_LOJA_TOTAL, statusCupom: "Ativo" });
-}
-
-export async function abrirFaturamentoLoja() {
-  const hoje = new Date().toISOString().slice(0, 10);
+   Valor agregado de faturamento total (+ delivery) do período (ex.: "FAT.
+   LOJA" do relatório), sem vínculo com um cupom/parceiro específico.
+   Gravado como um lançamento comum com parceiroId vazio — não cria
+   nenhum registro na Prospecção/Parceiros. */
+export async function abrirFaturamentoLoja(existente = null) {
+  const ed = !!existente;
+  const l = existente || {};
+  const dataInicioIni = l.dataInicio || new Date().toISOString().slice(0, 10);
   openModal({
-    title: "Faturamento da loja",
+    title: ed ? "Editar faturamento da loja" : "Faturamento da loja",
     subtitle: "Valor total do período, sem vínculo com um cupom específico",
-    submitLabel: "Adicionar",
+    submitLabel: ed ? "Salvar alterações" : "Adicionar",
     bodyHtml: `
-      ${fieldSelect("periodoTipo", "Tipo de período (duração)", PERIODO_TIPOS, { value: "Semana" })}
+      ${fieldSelect("periodoTipo", "Tipo de período (duração)", PERIODO_TIPOS, { value: rotuloTipoAtual(l.periodoTipo || "semana") })}
       <div class="field-2col">
-        ${fieldText("dataInicio", "Início do período", { type: "date", required: true, value: hoje })}
-        ${fieldText("dataFim", "Fim do período", { type: "date", required: true, value: hoje })}
+        ${fieldText("dataInicio", "Início do período", { type: "date", required: true, value: dataInicioIni })}
+        ${fieldText("dataFim", "Fim do período", { type: "date", required: true, value: l.dataFim || dataInicioIni })}
       </div>
-      ${fieldText("periodoLabel", "Rótulo do período", { hint: "Preenchido automaticamente a partir do tipo e das datas — pode editar se quiser." })}
-      ${fieldText("faturamentoTotal", "Faturamento total da loja (R$)", { type: "number", required: true, placeholder: "Ex.: 84281.93" })}
-      ${fieldText("faturamentoDelivery", "Faturamento via delivery (R$)", { type: "number", placeholder: "Ex.: 6684.28", hint: "Opcional — deixe em branco se o período não tiver esse dado." })}
+      ${fieldText("periodoLabel", "Rótulo do período", { value: l.periodoLabel || "", hint: "Preenchido automaticamente a partir do tipo e das datas — pode editar se quiser." })}
+      ${fieldText("faturamentoTotal", "Faturamento total da loja (R$)", { type: "number", required: true, value: l.faturamentoTotal ?? "", placeholder: "Ex.: 84281.93" })}
+      ${fieldText("faturamentoDelivery", "Faturamento via delivery (R$)", { type: "number", value: l.faturamentoDelivery ?? "", placeholder: "Ex.: 6684.28", hint: "Opcional — deixe em branco se o período não tiver esse dado." })}
     `,
     onMount: (form) => wirePeriodo(form),
     onSubmit: async (form) => {
@@ -351,9 +345,8 @@ export async function abrirFaturamentoLoja() {
       if (!dataInicio) throw new Error("Informe o início do período.");
       if (!dataFim) throw new Error("Informe o fim do período.");
       if (!faturamentoTotal) throw new Error("Informe o faturamento total da loja.");
-      const parceiro = await parceiroLojaTotal();
-      await store.addLancamento({
-        parceiroId: parceiro.id,
+      const campos = {
+        parceiroId: "",
         dataInicio,
         dataFim,
         periodoTipo: PERIODO_MAP[readValue(form, "periodoTipo")] || "dia",
@@ -362,7 +355,9 @@ export async function abrirFaturamentoLoja() {
         faturamentoCupom: 0,
         faturamentoTotal,
         faturamentoDelivery: readValue(form, "faturamentoDelivery"),
-      });
+      };
+      if (ed) await store.updateLancamento(l.id, campos);
+      else await store.addLancamento(campos);
       avisarMudanca();
     },
   });

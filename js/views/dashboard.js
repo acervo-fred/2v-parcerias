@@ -32,7 +32,8 @@ export async function renderDashboard(app) {
     store.getLojaAtual(),
   ]);
   const porId = Object.fromEntries(parceiros.map((p) => [p.id, p]));
-  const parceirosOrdenados = [...parceiros].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+  const parceirosOrdenados = [...parceiros].sort((a, b) => (a.cupom || "").localeCompare(b.cupom || "", "pt-BR"));
+  const mesesComDados = [...new Set(lancamentos.map((l) => (l.dataInicio || "").slice(0, 7)).filter(Boolean))].sort();
 
   const [deInicial, ateInicial] = presetRange("mes");
 
@@ -50,11 +51,15 @@ export async function renderDashboard(app) {
         `<button class="chip ${p === "mes" ? "active" : ""}" data-preset="${p}">${presetLabel(p)}</button>`
       ).join("")}
     </div>
+    ${mesesComDados.length ? `
+    <div class="filter-row" id="meses" style="margin-bottom:14px">
+      ${mesesComDados.map((m) => `<button class="chip" data-mes="${m}">${mesLabelLongo(m)}</button>`).join("")}
+    </div>` : ""}
     <div class="toolbar" style="margin-bottom:14px; gap:10px; align-items:flex-end; flex-wrap:wrap">
       <div class="field" style="margin-bottom:0"><label>Parceiro</label>
         <select class="input select-compact" id="f-parceiro">
           <option value="">Todos os parceiros</option>
-          ${parceirosOrdenados.map((p) => `<option value="${esc(p.id)}" title="${esc(p.nome)} — ${esc(p.cupom)}">${esc(p.nome)} — ${esc(p.cupom)}</option>`).join("")}
+          ${parceirosOrdenados.map((p) => `<option value="${esc(p.id)}" title="${esc(p.cupom)} — ${esc(p.nome)}">${esc(p.cupom)} — ${esc(p.nome)}</option>`).join("")}
         </select>
       </div>
       <div class="field" style="margin-bottom:0"><label>Tipo de parceiro</label>
@@ -206,14 +211,26 @@ export async function renderDashboard(app) {
     const btn = e.target.closest("[data-preset]");
     if (!btn) return;
     app.querySelectorAll("[data-preset]").forEach((b) => b.classList.toggle("active", b === btn));
+    app.querySelectorAll("#meses [data-mes]").forEach((b) => b.classList.remove("active"));
     const [de, ate] = presetRange(btn.dataset.preset);
     app.querySelector("#f-de").value = de;
     app.querySelector("#f-ate").value = ate;
     atualizarPeriodo();
   });
+  app.querySelector("#meses")?.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-mes]");
+    if (!btn) return;
+    app.querySelectorAll("[data-preset]").forEach((b) => b.classList.remove("active"));
+    app.querySelectorAll("#meses [data-mes]").forEach((b) => b.classList.toggle("active", b === btn));
+    const mes = btn.dataset.mes;
+    app.querySelector("#f-de").value = `${mes}-01`;
+    app.querySelector("#f-ate").value = ultimoDiaMes(mes);
+    atualizarPeriodo();
+  });
   ["#f-de", "#f-ate"].forEach((sel) => {
     app.querySelector(sel).addEventListener("change", () => {
       app.querySelectorAll("[data-preset]").forEach((b) => b.classList.remove("active"));
+      app.querySelectorAll("#meses [data-mes]").forEach((b) => b.classList.remove("active"));
       atualizarPeriodo();
     });
   });
@@ -309,6 +326,15 @@ function formatDataBRlocal(iso) {
   if (!iso || !/^\d{4}-\d{2}-\d{2}/.test(iso)) return "—";
   const [y, m, d] = iso.slice(0, 10).split("-");
   return `${d}/${m}/${y}`;
+}
+// "jun/2025" — usado na guia de meses com dados (ano completo, diferente de mesLabel do eixo dos gráficos)
+function mesLabelLongo(m) {
+  const [y, mo] = m.split("-");
+  return `${MES_NOMES[parseInt(mo, 10) - 1]}/${y}`;
+}
+function ultimoDiaMes(mesStr) {
+  const [y, m] = mesStr.split("-").map(Number);
+  return `${mesStr}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
 }
 
 /* ---------- agregações ---------- */
@@ -448,8 +474,8 @@ function desenharRanking(app, doPeriodo, porId) {
   }
   const max = Math.max(...linhas.map((l) => l.fat));
   container.innerHTML = linhas.map((l) => `
-    <div class="viz-bar-row" data-id="${esc(l.parceiro.id)}" tabindex="0" role="img" aria-label="${esc(l.parceiro.nome)}: ${esc(formatMoeda(l.fat))}, ${l.uso} usos">
-      <div class="viz-bar-label" title="${esc(l.parceiro.nome)}">${esc(l.parceiro.nome)}</div>
+    <div class="viz-bar-row" data-id="${esc(l.parceiro.id)}" tabindex="0" role="img" aria-label="${esc(l.parceiro.cupom)}: ${esc(formatMoeda(l.fat))}, ${l.uso} usos">
+      <div class="viz-bar-label" title="${esc(l.parceiro.cupom)} — ${esc(l.parceiro.nome)}">${esc(l.parceiro.cupom)}</div>
       <div class="viz-bar-track"><div class="viz-bar-fill" style="width:${Math.max(2, Math.round((l.fat / max) * 100))}%"></div></div>
       <div class="viz-bar-val">${esc(formatMoeda(l.fat))}</div>
     </div>
@@ -473,8 +499,8 @@ function desenharRankingUsos(app, doPeriodo, porId) {
   }
   const max = Math.max(...linhas.map((l) => l.uso));
   container.innerHTML = linhas.map((l) => `
-    <div class="viz-bar-row" data-id="${esc(l.parceiro.id)}" tabindex="0" role="img" aria-label="${esc(l.parceiro.nome)}: ${l.uso} usos">
-      <div class="viz-bar-label" title="${esc(l.parceiro.nome)}">${esc(l.parceiro.nome)}</div>
+    <div class="viz-bar-row" data-id="${esc(l.parceiro.id)}" tabindex="0" role="img" aria-label="${esc(l.parceiro.cupom)}: ${l.uso} usos">
+      <div class="viz-bar-label" title="${esc(l.parceiro.cupom)} — ${esc(l.parceiro.nome)}">${esc(l.parceiro.cupom)}</div>
       <div class="viz-bar-track"><div class="viz-bar-fill" style="width:${Math.max(2, Math.round((l.uso / max) * 100))}%"></div></div>
       <div class="viz-bar-val">${l.uso}</div>
     </div>
@@ -509,7 +535,7 @@ function desenharParticipacao(app, doPeriodo, porId) {
   const outros = linhas.slice(CORES_CATEGORICAS.length).reduce((s, l) => s + l.fat, 0);
 
   const segmentos = top.map((l, i) => ({
-    label: `${l.parceiro.nome} — ${l.parceiro.cupom}`, valor: l.fat, cor: CORES_CATEGORICAS[i],
+    label: l.parceiro.cupom, valor: l.fat, cor: CORES_CATEGORICAS[i],
   }));
   if (outros > 0) segmentos.push({ label: "Outros", valor: outros, cor: COR_OUTROS });
 
@@ -735,7 +761,7 @@ function wireLineChartHover(container, pontos, formatValue) {
 
 /* ---------- comparação (barras pareadas, 2 séries + linha sobreposta) ---------- */
 function compareColHtml(id, parceiros, de, ate) {
-  const opts = parceiros.map((p) => `<option value="${esc(p.id)}">${esc(p.nome)} — ${esc(p.cupom)}</option>`).join("");
+  const opts = parceiros.map((p) => `<option value="${esc(p.id)}">${esc(p.cupom)} — ${esc(p.nome)}</option>`).join("");
   return `<div class="compare-col">
     <div class="field"><label>Cupom / parceiro</label><select class="input" id="cmp-${id}-parceiro">${opts}</select></div>
     <div class="field-2col">
@@ -775,8 +801,8 @@ function compararEDesenhar(app, lancamentos, porId) {
   const a = calcularAgregado(lancamentos, pidA, deA, ateA);
   const b = calcularAgregado(lancamentos, pidB, deB, ateB);
   const pA = porId[pidA], pB = porId[pidB];
-  const nomeA = pA ? `${pA.nome} — ${pA.cupom}` : "—";
-  const nomeB = pB ? `${pB.nome} — ${pB.cupom}` : "—";
+  const nomeA = pA ? pA.cupom : "—";
+  const nomeB = pB ? pB.cupom : "—";
 
   const totalPeriodoA = totalCupomNoPeriodo(lancamentos, deA, ateA);
   const totalPeriodoB = totalCupomNoPeriodo(lancamentos, deB, ateB);
