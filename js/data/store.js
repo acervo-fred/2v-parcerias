@@ -15,6 +15,7 @@
 
 import * as mock from "./mock.js";
 import { USE_FIRESTORE } from "../config/firebase-config.js";
+import { getLojaAtualId, setLojaAtualId } from "./loja-atual.js";
 
 const LS_KEY = "2v-parcerias-db-v1";
 
@@ -23,6 +24,7 @@ function estadoInicial() {
     parceiros: structuredClone(mock.parceiros),
     lancamentos: structuredClone(mock.lancamentos),
     listas: structuredClone(mock.listas),
+    lojas: [],
   };
 }
 
@@ -50,6 +52,28 @@ function novoId(prefixo) {
   return `${prefixo}_${Date.now().toString(36)}${Math.floor(Math.random() * 1000)}`;
 }
 
+// resolve a loja atual (localStorage) e cai pra primeira loja cadastrada
+// se não houver seleção válida; cacheada pro resto da sessão (troca de
+// loja recarrega a página, então não precisa invalidar em runtime).
+let lojaCache;
+async function lojaAtual() {
+  if (lojaCache !== undefined) return lojaCache;
+  const lojas = db.lojas;
+  let id = getLojaAtualId();
+  let achada = lojas.find((l) => l.id === id);
+  if (!achada && lojas.length) {
+    achada = [...lojas].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"))[0];
+    setLojaAtualId(achada.id);
+  }
+  lojaCache = achada || null;
+  return lojaCache;
+}
+async function lojaAtualIdOuErro() {
+  const l = await lojaAtual();
+  if (!l) throw new Error("Nenhuma loja selecionada. Crie uma loja primeiro.");
+  return l.id;
+}
+
 function atualizar(colecao, id, campos) {
   const item = colecao.find((x) => x.id === id);
   if (!item) return null;
@@ -72,6 +96,7 @@ function remover(colecao, id) {
 // schema novo (dataInicio/dataFim + faturamentoTotal).
 function enrichLancamento(l) {
   const faturamentoCupom = Number(l.faturamentoCupom) || 0;
+  const faturamentoDelivery = Number(l.faturamentoDelivery) || 0;
   const dataInicio = l.dataInicio || l.data || "";
   const dataFim = l.dataFim || dataInicio;
   const faturamentoTotal = l.faturamentoTotal !== undefined
@@ -79,13 +104,23 @@ function enrichLancamento(l) {
     : faturamentoCupom + (Number(l.faturamentoTotalSemCupom) || 0);
   return {
     ...l,
-    dataInicio, dataFim, faturamentoCupom, faturamentoTotal,
+    dataInicio, dataFim, faturamentoCupom, faturamentoTotal, faturamentoDelivery,
     faturamentoSemCupom: Math.max(0, faturamentoTotal - faturamentoCupom),
     ticketMedio: l.quantidadeUso > 0 ? faturamentoCupom / l.quantidadeUso : 0,
   };
 }
 
 const localStore = {
+  /* ---------- lojas (venues) ---------- */
+  async listLojas() { return structuredClone(db.lojas); },
+  async getLojaAtual() { return lojaAtual(); },
+  async addLoja(nome) {
+    const novo = { id: novoId("lj"), nome, criadoEm: new Date().toISOString().slice(0, 10) };
+    db.lojas.push(novo);
+    persistir();
+    return structuredClone(novo);
+  },
+
   /* ---------- listas de configuração ---------- */
   async getListas() { return structuredClone(db.listas); },
   async saveLista(chave, valores) {
@@ -95,18 +130,24 @@ const localStore = {
   },
 
   /* ---------- PARCEIROS ---------- */
-  async listParceiros() { return structuredClone(db.parceiros); },
+  async listParceiros() {
+    const lojaId = await lojaAtualIdOuErro();
+    return structuredClone(db.parceiros.filter((p) => p.lojaId === lojaId));
+  },
   async getParceiro(id) {
     const p = db.parceiros.find((x) => x.id === id);
     return p ? structuredClone(p) : null;
   },
   // já são parceiros ativos/fechados
   async listParceirosFechados() {
-    return db.parceiros.filter((p) => p.ehParceiro).map((p) => structuredClone(p));
+    const lojaId = await lojaAtualIdOuErro();
+    return db.parceiros.filter((p) => p.ehParceiro && p.lojaId === lojaId).map((p) => structuredClone(p));
   },
   async addParceiro(dados) {
+    const lojaId = await lojaAtualIdOuErro();
     const novo = {
       id: novoId("pc"),
+      lojaId,
       area: dados.area || "",
       nome: dados.nome,
       local: dados.local || "",
@@ -142,11 +183,14 @@ const localStore = {
       .sort((a, b) => (b.dataInicio || "").localeCompare(a.dataInicio || ""));
   },
   async listLancamentos() {
-    return db.lancamentos.map(enrichLancamento);
+    const lojaId = await lojaAtualIdOuErro();
+    return db.lancamentos.filter((l) => l.lojaId === lojaId).map(enrichLancamento);
   },
   async addLancamento(dados) {
+    const lojaId = await lojaAtualIdOuErro();
     const novo = {
       id: novoId("lz"),
+      lojaId,
       parceiroId: dados.parceiroId,
       dataInicio: dados.dataInicio,
       dataFim: dados.dataFim || dados.dataInicio,
@@ -155,6 +199,7 @@ const localStore = {
       quantidadeUso: Number(dados.quantidadeUso) || 0,
       faturamentoCupom: Number(dados.faturamentoCupom) || 0,
       faturamentoTotal: Number(dados.faturamentoTotal) || 0,
+      faturamentoDelivery: Number(dados.faturamentoDelivery) || 0,
       observacoes: dados.observacoes || "",
     };
     db.lancamentos.push(novo);
@@ -163,8 +208,10 @@ const localStore = {
   },
   // grava vários lançamentos de uma vez (um período, vários cupons) — um só save no final
   async addLancamentosLote(linhas) {
+    const lojaId = await lojaAtualIdOuErro();
     const novos = linhas.map((dados) => ({
       id: novoId("lz"),
+      lojaId,
       parceiroId: dados.parceiroId,
       dataInicio: dados.dataInicio,
       dataFim: dados.dataFim || dados.dataInicio,
@@ -173,6 +220,7 @@ const localStore = {
       quantidadeUso: Number(dados.quantidadeUso) || 0,
       faturamentoCupom: Number(dados.faturamentoCupom) || 0,
       faturamentoTotal: Number(dados.faturamentoTotal) || 0,
+      faturamentoDelivery: Number(dados.faturamentoDelivery) || 0,
       observacoes: dados.observacoes || "",
     }));
     db.lancamentos.push(...novos);
@@ -187,6 +235,7 @@ const localStore = {
       quantidadeUso: campos.quantidadeUso !== undefined ? Number(campos.quantidadeUso) : l.quantidadeUso,
       faturamentoCupom: campos.faturamentoCupom !== undefined ? Number(campos.faturamentoCupom) : l.faturamentoCupom,
       faturamentoTotal: campos.faturamentoTotal !== undefined ? Number(campos.faturamentoTotal) : l.faturamentoTotal,
+      faturamentoDelivery: campos.faturamentoDelivery !== undefined ? Number(campos.faturamentoDelivery) : l.faturamentoDelivery,
     });
     persistir();
     return enrichLancamento(l);
@@ -195,10 +244,10 @@ const localStore = {
 
   /* ---------- BACKUP ---------- */
   async exportAll() {
-    return structuredClone({ parceiros: db.parceiros, lancamentos: db.lancamentos, listas: db.listas });
+    return structuredClone({ parceiros: db.parceiros, lancamentos: db.lancamentos, listas: db.listas, lojas: db.lojas });
   },
   async importAll(data) {
-    ["parceiros", "lancamentos"].forEach((k) => {
+    ["parceiros", "lancamentos", "lojas"].forEach((k) => {
       if (Array.isArray(data[k])) db[k] = structuredClone(data[k]);
     });
     if (data.listas) db.listas = structuredClone(data.listas);

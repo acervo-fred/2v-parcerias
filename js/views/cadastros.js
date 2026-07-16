@@ -341,6 +341,7 @@ export async function abrirFaturamentoLoja() {
       </div>
       ${fieldText("periodoLabel", "Rótulo do período", { hint: "Preenchido automaticamente a partir do tipo e das datas — pode editar se quiser." })}
       ${fieldText("faturamentoTotal", "Faturamento total da loja (R$)", { type: "number", required: true, placeholder: "Ex.: 84281.93" })}
+      ${fieldText("faturamentoDelivery", "Faturamento via delivery (R$)", { type: "number", placeholder: "Ex.: 6684.28", hint: "Opcional — deixe em branco se o período não tiver esse dado." })}
     `,
     onMount: (form) => wirePeriodo(form),
     onSubmit: async (form) => {
@@ -360,6 +361,7 @@ export async function abrirFaturamentoLoja() {
         quantidadeUso: 0,
         faturamentoCupom: 0,
         faturamentoTotal,
+        faturamentoDelivery: readValue(form, "faturamentoDelivery"),
       });
       avisarMudanca();
     },

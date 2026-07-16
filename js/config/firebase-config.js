@@ -29,4 +29,5 @@ export const COLLECTIONS = {
   parceiros: "parceiros",
   lancamentos: "lancamentos",
   config: "config", // doc "listas" guarda todas as listas editáveis
+  lojas: "lojas", // cada loja tem parceiros/lançamentos próprios (campo lojaId)
 };

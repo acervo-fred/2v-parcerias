@@ -18,6 +18,7 @@ import {
 
 import { firebaseConfig, COLLECTIONS } from "../config/firebase-config.js";
 import { listas as listasDefault } from "./mock.js";
+import { getLojaAtualId, setLojaAtualId } from "./loja-atual.js";
 
 const app = initializeApp(firebaseConfig);
 const fdb = getFirestore(app);
@@ -31,8 +32,38 @@ async function docsWhere(coll, campo, valor) {
   const snap = await getDocsFromServer(query(collection(fdb, coll), where(campo, "==", valor)));
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
+// múltiplas condições de igualdade — Firestore resolve sem índice composto
+async function docsWhereAll(coll, pares) {
+  const snap = await getDocsFromServer(
+    query(collection(fdb, coll), ...pares.map(([campo, valor]) => where(campo, "==", valor)))
+  );
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
+
+// resolve a loja atual (localStorage) e cai pra primeira loja cadastrada
+// se não houver seleção válida; cacheada pro resto da sessão (troca de
+// loja recarrega a página, então não precisa invalidar em runtime).
+let lojaCache;
+async function lojaAtual() {
+  if (lojaCache !== undefined) return lojaCache;
+  const lojas = await allDocs(COLLECTIONS.lojas);
+  let id = getLojaAtualId();
+  let achada = lojas.find((l) => l.id === id);
+  if (!achada && lojas.length) {
+    achada = [...lojas].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"))[0];
+    setLojaAtualId(achada.id);
+  }
+  lojaCache = achada || null;
+  return lojaCache;
+}
+async function lojaAtualIdOuErro() {
+  const l = await lojaAtual();
+  if (!l) throw new Error("Nenhuma loja selecionada. Crie uma loja primeiro.");
+  return l.id;
+}
 function enrichLancamento(l) {
   const faturamentoCupom = Number(l.faturamentoCupom) || 0;
+  const faturamentoDelivery = Number(l.faturamentoDelivery) || 0;
   const dataInicio = l.dataInicio || l.data || "";
   const dataFim = l.dataFim || dataInicio;
   const faturamentoTotal = l.faturamentoTotal !== undefined
@@ -40,7 +71,7 @@ function enrichLancamento(l) {
     : faturamentoCupom + (Number(l.faturamentoTotalSemCupom) || 0);
   return {
     ...l,
-    dataInicio, dataFim, faturamentoCupom, faturamentoTotal,
+    dataInicio, dataFim, faturamentoCupom, faturamentoTotal, faturamentoDelivery,
     faturamentoSemCupom: Math.max(0, faturamentoTotal - faturamentoCupom),
     ticketMedio: l.quantidadeUso > 0 ? faturamentoCupom / l.quantidadeUso : 0,
   };
@@ -48,6 +79,15 @@ function enrichLancamento(l) {
 function numOrZero(v) { return Number(v) || 0; }
 
 export const firestoreStore = {
+  /* ---------- lojas (venues) ---------- */
+  async listLojas() { return allDocs(COLLECTIONS.lojas); },
+  async getLojaAtual() { return lojaAtual(); },
+  async addLoja(nome) {
+    const novo = { nome, criadoEm: new Date().toISOString().slice(0, 10) };
+    const ref = await addDoc(collection(fdb, COLLECTIONS.lojas), novo);
+    return { id: ref.id, ...novo };
+  },
+
   /* ---------- listas de configuração ---------- */
   async getListas() {
     const snap = await getDoc(doc(fdb, COLLECTIONS.config, "listas"));
@@ -60,14 +100,22 @@ export const firestoreStore = {
   },
 
   /* ---------- PARCEIROS ---------- */
-  async listParceiros() { return allDocs(COLLECTIONS.parceiros); },
+  async listParceiros() {
+    const lojaId = await lojaAtualIdOuErro();
+    return docsWhere(COLLECTIONS.parceiros, "lojaId", lojaId);
+  },
   async getParceiro(id) {
     const snap = await getDoc(doc(fdb, COLLECTIONS.parceiros, id));
     return snap.exists() ? { id: snap.id, ...snap.data() } : null;
   },
-  async listParceirosFechados() { return docsWhere(COLLECTIONS.parceiros, "ehParceiro", true); },
+  async listParceirosFechados() {
+    const lojaId = await lojaAtualIdOuErro();
+    return docsWhereAll(COLLECTIONS.parceiros, [["lojaId", lojaId], ["ehParceiro", true]]);
+  },
   async addParceiro(dados) {
+    const lojaId = await lojaAtualIdOuErro();
     const novo = {
+      lojaId,
       area: dados.area || "", nome: dados.nome, local: dados.local || "",
       contato: dados.contato || "", tipo: dados.tipo || "", responsavel: dados.responsavel || "",
       observacoes: dados.observacoes || "", statusProspeccao: dados.statusProspeccao || "Prospecção",
@@ -99,26 +147,33 @@ export const firestoreStore = {
     return lancs.map(enrichLancamento).sort((a, b) => (b.dataInicio || "").localeCompare(a.dataInicio || ""));
   },
   async listLancamentos() {
-    const lancs = await allDocs(COLLECTIONS.lancamentos);
+    const lojaId = await lojaAtualIdOuErro();
+    const lancs = await docsWhere(COLLECTIONS.lancamentos, "lojaId", lojaId);
     return lancs.map(enrichLancamento);
   },
   async addLancamento(dados) {
+    const lojaId = await lojaAtualIdOuErro();
     const novo = {
+      lojaId,
       parceiroId: dados.parceiroId, dataInicio: dados.dataInicio, dataFim: dados.dataFim || dados.dataInicio,
       periodoTipo: dados.periodoTipo || "dia", periodoLabel: dados.periodoLabel || "",
       quantidadeUso: numOrZero(dados.quantidadeUso), faturamentoCupom: numOrZero(dados.faturamentoCupom),
-      faturamentoTotal: numOrZero(dados.faturamentoTotal), observacoes: dados.observacoes || "",
+      faturamentoTotal: numOrZero(dados.faturamentoTotal), faturamentoDelivery: numOrZero(dados.faturamentoDelivery),
+      observacoes: dados.observacoes || "",
     };
     const ref = await addDoc(collection(fdb, COLLECTIONS.lancamentos), novo);
     return enrichLancamento({ id: ref.id, ...novo });
   },
   async addLancamentosLote(linhas) {
+    const lojaId = await lojaAtualIdOuErro();
     const novos = await Promise.all(linhas.map(async (dados) => {
       const novo = {
+        lojaId,
         parceiroId: dados.parceiroId, dataInicio: dados.dataInicio, dataFim: dados.dataFim || dados.dataInicio,
         periodoTipo: dados.periodoTipo || "dia", periodoLabel: dados.periodoLabel || "",
         quantidadeUso: numOrZero(dados.quantidadeUso), faturamentoCupom: numOrZero(dados.faturamentoCupom),
-        faturamentoTotal: numOrZero(dados.faturamentoTotal), observacoes: dados.observacoes || "",
+        faturamentoTotal: numOrZero(dados.faturamentoTotal), faturamentoDelivery: numOrZero(dados.faturamentoDelivery),
+        observacoes: dados.observacoes || "",
       };
       const ref = await addDoc(collection(fdb, COLLECTIONS.lancamentos), novo);
       return { id: ref.id, ...novo };
@@ -135,6 +190,7 @@ export const firestoreStore = {
       quantidadeUso: campos.quantidadeUso !== undefined ? numOrZero(campos.quantidadeUso) : atual.quantidadeUso,
       faturamentoCupom: campos.faturamentoCupom !== undefined ? numOrZero(campos.faturamentoCupom) : atual.faturamentoCupom,
       faturamentoTotal: campos.faturamentoTotal !== undefined ? numOrZero(campos.faturamentoTotal) : atual.faturamentoTotal,
+      faturamentoDelivery: campos.faturamentoDelivery !== undefined ? numOrZero(campos.faturamentoDelivery) : atual.faturamentoDelivery,
     };
     await updateDoc(ref, merged);
     return enrichLancamento({ id, ...merged });
@@ -143,10 +199,10 @@ export const firestoreStore = {
 
   /* ---------- BACKUP ---------- */
   async exportAll() {
-    const [parceiros, lancamentos, listas] = await Promise.all([
-      allDocs(COLLECTIONS.parceiros), allDocs(COLLECTIONS.lancamentos), this.getListas(),
+    const [parceiros, lancamentos, lojas, listas] = await Promise.all([
+      allDocs(COLLECTIONS.parceiros), allDocs(COLLECTIONS.lancamentos), allDocs(COLLECTIONS.lojas), this.getListas(),
     ]);
-    return { parceiros, lancamentos, listas };
+    return { parceiros, lancamentos, lojas, listas };
   },
   async importAll(data) {
     const grava = async (chaveColl, itens) => {
@@ -159,6 +215,7 @@ export const firestoreStore = {
     };
     await grava(COLLECTIONS.parceiros, data.parceiros);
     await grava(COLLECTIONS.lancamentos, data.lancamentos);
+    await grava(COLLECTIONS.lojas, data.lojas);
     if (data.listas) await setDoc(doc(fdb, COLLECTIONS.config, "listas"), data.listas);
   },
 };

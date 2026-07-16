@@ -303,7 +303,7 @@ function lancamentoRow(l) {
   return `<div class="list-row">
     <div class="lr-main">
       <div class="lr-title">${esc(periodo)} ${rotulo ? `<span class="muted" style="font-weight:400">· ${esc(rotulo)}</span>` : ""}</div>
-      <div class="lr-sub">${l.quantidadeUso} usos · ${esc(formatMoeda(l.faturamentoCupom))} via cupom · ${esc(formatMoeda(l.faturamentoTotal))} faturamento total · ticket médio ${esc(formatMoeda(l.ticketMedio))}</div>
+      <div class="lr-sub">${l.quantidadeUso} usos · ${esc(formatMoeda(l.faturamentoCupom))} via cupom · ${esc(formatMoeda(l.faturamentoTotal))} faturamento total${l.faturamentoDelivery ? ` · ${esc(formatMoeda(l.faturamentoDelivery))} via delivery` : ""} · ticket médio ${esc(formatMoeda(l.ticketMedio))}</div>
       ${l.observacoes ? `<div class="lr-sub">${esc(l.observacoes)}</div>` : ""}
     </div>
     <span class="lr-actions">

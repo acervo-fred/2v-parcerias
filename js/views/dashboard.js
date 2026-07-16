@@ -25,10 +25,11 @@ const CORES_CATEGORICAS = ["#2a78d6", "#1baf7a", "#eda100", "#008300", "#4a3aa7"
 const COR_OUTROS = "var(--c-gray-fg)";
 
 export async function renderDashboard(app) {
-  const [lancamentos, parceiros, listas] = await Promise.all([
+  const [lancamentos, parceiros, listas, lojaAtual] = await Promise.all([
     store.listLancamentos(),
     store.listParceirosFechados(),
     store.getListas(),
+    store.getLojaAtual(),
   ]);
   const porId = Object.fromEntries(parceiros.map((p) => [p.id, p]));
   const parceirosOrdenados = [...parceiros].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
@@ -41,7 +42,7 @@ export async function renderDashboard(app) {
 
   app.innerHTML = `
     <div class="page-head">
-      <div><h1 class="page-title">Desempenho dos cupons 2V - Largo do Machado</h1></div>
+      <div><h1 class="page-title">Desempenho dos cupons 2V${lojaAtual ? ` - ${esc(lojaAtual.nome)}` : ""}</h1></div>
     </div>
 
     <div class="filter-row" id="presets" style="margin-bottom:10px">
@@ -394,31 +395,39 @@ function stat(num, label, delta) {
   return `<div class="stat"><div class="stat-num">${num}</div><div class="stat-label">${esc(label)}</div>${deltaBadgeHtml(delta)}</div>`;
 }
 
-/* ---------- render: rosca (donut) — cupom vs faturamento total ---------- */
+/* ---------- render: rosca (donut) — cupom + delivery vs faturamento total ---------- */
 function desenharDonutCupom(app, doPeriodo) {
   const totalCupom = doPeriodo.reduce((s, l) => s + l.faturamentoCupom, 0);
   const totalSemCupom = doPeriodo.reduce((s, l) => s + l.faturamentoSemCupom, 0);
+  const totalDelivery = doPeriodo.reduce((s, l) => s + (l.faturamentoDelivery || 0), 0);
   const totalGeral = totalCupom + totalSemCupom;
-  const pct = totalGeral > 0 ? (totalCupom / totalGeral) * 100 : 0;
+  const pctCupom = totalGeral > 0 ? (totalCupom / totalGeral) * 100 : 0;
+  const pctDelivery = totalGeral > 0 ? (totalDelivery / totalGeral) * 100 : 0;
 
   app.querySelector("#donut-cupom").innerHTML = `
-    <div class="viz-donut-wrap">${donutSVG(pct)}</div>
-    <div class="viz-meter-legend">
-      <span>${esc(formatMoeda(totalCupom))} via cupom</span>
-      <span>${esc(formatMoeda(totalGeral))} total</span>
+    <div class="viz-donut-wrap">${donutSVG(pctCupom, pctDelivery)}</div>
+    <div class="viz-stack-legend">
+      <div class="viz-stack-legend-item"><i style="background:var(--chart-series-a)"></i><span>Via cupom</span><strong>${esc(formatMoeda(totalCupom))} (${pctCupom.toFixed(1)}%)</strong></div>
+      <div class="viz-stack-legend-item"><i style="background:var(--chart-series-b)"></i><span>Via delivery</span><strong>${esc(formatMoeda(totalDelivery))} (${pctDelivery.toFixed(1)}%)</strong></div>
     </div>
+    <div class="viz-meter-legend"><span>${esc(formatMoeda(totalGeral))} faturamento total</span></div>
   `;
 }
-function donutSVG(pct) {
+function donutSVG(pctCupom, pctDelivery) {
   const size = 168, stroke = 20, r = (size - stroke) / 2, c = size / 2;
   const circunferencia = 2 * Math.PI * r;
-  const preenchido = (Math.min(100, Math.max(0, pct)) / 100) * circunferencia;
-  return `<svg viewBox="0 0 ${size} ${size}" class="viz-donut" width="${size}" height="${size}" role="img" aria-label="${pct.toFixed(1)}% do faturamento vem de cupom">
+  const segCupom = (Math.min(100, Math.max(0, pctCupom)) / 100) * circunferencia;
+  const segDelivery = (Math.min(100, Math.max(0, pctDelivery)) / 100) * circunferencia;
+  return `<svg viewBox="0 0 ${size} ${size}" class="viz-donut" width="${size}" height="${size}" role="img" aria-label="${pctCupom.toFixed(1)}% via cupom, ${pctDelivery.toFixed(1)}% via delivery">
     <circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="var(--chart-track)" stroke-width="${stroke}"/>
     <circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="var(--chart-series-a)" stroke-width="${stroke}"
-      stroke-dasharray="${preenchido.toFixed(1)} ${(circunferencia - preenchido).toFixed(1)}"
-      stroke-linecap="round" transform="rotate(-90 ${c} ${c})"/>
-    <text x="${c}" y="${c - 2}" text-anchor="middle" font-size="27" font-weight="700" fill="var(--text)">${pct.toFixed(1)}%</text>
+      stroke-dasharray="${segCupom.toFixed(1)} ${(circunferencia - segCupom).toFixed(1)}"
+      stroke-linecap="butt" transform="rotate(-90 ${c} ${c})"/>
+    <circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="var(--chart-series-b)" stroke-width="${stroke}"
+      stroke-dasharray="${segDelivery.toFixed(1)} ${(circunferencia - segDelivery).toFixed(1)}"
+      stroke-dashoffset="${(-segCupom).toFixed(1)}"
+      stroke-linecap="butt" transform="rotate(-90 ${c} ${c})"/>
+    <text x="${c}" y="${c - 2}" text-anchor="middle" font-size="27" font-weight="700" fill="var(--text)">${pctCupom.toFixed(1)}%</text>
     <text x="${c}" y="${c + 18}" text-anchor="middle" font-size="11" fill="var(--chart-ink-muted)">via cupom</text>
   </svg>`;
 }

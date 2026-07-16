@@ -6,6 +6,7 @@ import { renderParceiro } from "./views/parceiro.js";
 import { renderLancamentos } from "./views/lancamentos.js";
 import { renderDashboard } from "./views/dashboard.js";
 import { renderBackup } from "./views/backup.js";
+import { initLojaSwitcher } from "./ui/loja-switcher.js";
 import { esc } from "./ui/dom.js";
 
 const app = document.getElementById("app");
@@ -65,4 +66,5 @@ async function router() {
 window.addEventListener("hashchange", router);
 window.addEventListener("data-changed", router);
 
+initLojaSwitcher();
 router();

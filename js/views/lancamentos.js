@@ -114,7 +114,7 @@ function row(l, parceiro) {
   return `<div class="list-row">
     <div class="lr-main">
       <div class="lr-title">${esc(nomeParceiro)}</div>
-      <div class="lr-sub">${esc(periodo)}${l.periodoLabel ? ` · ${esc(l.periodoLabel)}` : ""} · ${l.quantidadeUso} usos · ${esc(formatMoeda(l.faturamentoCupom))} via cupom · ${esc(formatMoeda(l.faturamentoTotal))} faturamento total · ticket médio ${esc(formatMoeda(l.ticketMedio))}</div>
+      <div class="lr-sub">${esc(periodo)}${l.periodoLabel ? ` · ${esc(l.periodoLabel)}` : ""} · ${l.quantidadeUso} usos · ${esc(formatMoeda(l.faturamentoCupom))} via cupom · ${esc(formatMoeda(l.faturamentoTotal))} faturamento total${l.faturamentoDelivery ? ` · ${esc(formatMoeda(l.faturamentoDelivery))} via delivery` : ""} · ticket médio ${esc(formatMoeda(l.ticketMedio))}</div>
     </div>
     <span class="lr-actions">
       <button class="icon-btn" data-action="editar" data-id="${esc(l.id)}" title="Editar">✎</button>
