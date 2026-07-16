@@ -46,15 +46,16 @@ export async function renderDashboard(app) {
       <div><h1 class="page-title">Desempenho dos cupons 2V${lojaAtual ? ` - ${esc(lojaAtual.nome)}` : ""}</h1></div>
     </div>
 
-    <div class="filter-row" id="presets" style="margin-bottom:10px">
+    <div class="filter-row" id="presets" style="margin-bottom:14px; align-items:center">
       ${["semana", "mes", "mespassado", "ano", "tudo"].map((p) =>
         `<button class="chip ${p === "mes" ? "active" : ""}" data-preset="${p}">${presetLabel(p)}</button>`
       ).join("")}
+      ${mesesComDados.length ? `
+        <select class="input select-compact" id="f-mes" style="width:auto">
+          <option value="">Mês…</option>
+          ${mesesComDados.map((m) => `<option value="${m}">${mesLabelLongo(m)}</option>`).join("")}
+        </select>` : ""}
     </div>
-    ${mesesComDados.length ? `
-    <div class="filter-row" id="meses" style="margin-bottom:14px">
-      ${mesesComDados.map((m) => `<button class="chip" data-mes="${m}">${mesLabelLongo(m)}</button>`).join("")}
-    </div>` : ""}
     <div class="toolbar" style="margin-bottom:14px; gap:10px; align-items:flex-end; flex-wrap:wrap">
       <div class="field" style="margin-bottom:0"><label>Parceiro</label>
         <select class="input select-compact" id="f-parceiro">
@@ -211,18 +212,17 @@ export async function renderDashboard(app) {
     const btn = e.target.closest("[data-preset]");
     if (!btn) return;
     app.querySelectorAll("[data-preset]").forEach((b) => b.classList.toggle("active", b === btn));
-    app.querySelectorAll("#meses [data-mes]").forEach((b) => b.classList.remove("active"));
+    const selMes = app.querySelector("#f-mes");
+    if (selMes) selMes.value = "";
     const [de, ate] = presetRange(btn.dataset.preset);
     app.querySelector("#f-de").value = de;
     app.querySelector("#f-ate").value = ate;
     atualizarPeriodo();
   });
-  app.querySelector("#meses")?.addEventListener("click", (e) => {
-    const btn = e.target.closest("[data-mes]");
-    if (!btn) return;
+  app.querySelector("#f-mes")?.addEventListener("change", (e) => {
+    const mes = e.target.value;
+    if (!mes) return;
     app.querySelectorAll("[data-preset]").forEach((b) => b.classList.remove("active"));
-    app.querySelectorAll("#meses [data-mes]").forEach((b) => b.classList.toggle("active", b === btn));
-    const mes = btn.dataset.mes;
     app.querySelector("#f-de").value = `${mes}-01`;
     app.querySelector("#f-ate").value = ultimoDiaMes(mes);
     atualizarPeriodo();
@@ -230,7 +230,8 @@ export async function renderDashboard(app) {
   ["#f-de", "#f-ate"].forEach((sel) => {
     app.querySelector(sel).addEventListener("change", () => {
       app.querySelectorAll("[data-preset]").forEach((b) => b.classList.remove("active"));
-      app.querySelectorAll("#meses [data-mes]").forEach((b) => b.classList.remove("active"));
+      const selMes = app.querySelector("#f-mes");
+      if (selMes) selMes.value = "";
       atualizarPeriodo();
     });
   });
