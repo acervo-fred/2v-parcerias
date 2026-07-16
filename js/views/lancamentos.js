@@ -5,7 +5,7 @@
 
 import { store } from "../data/store.js";
 import { esc, formatMoeda, formatDataBR } from "../ui/dom.js";
-import { abrirLancamentoLote, abrirNovoLancamento } from "./cadastros.js";
+import { abrirLancamentoLote, abrirNovoLancamento, abrirFaturamentoLoja } from "./cadastros.js";
 
 export async function renderLancamentos(app) {
   const [lancamentos, parceiros] = await Promise.all([
@@ -27,6 +27,7 @@ export async function renderLancamentos(app) {
         <div class="page-sub">${lancamentos.length} lançamentos registrados</div>
       </div>
       <div class="toolbar">
+        <button class="btn btn-ghost" data-act="loja">+ Faturamento da loja</button>
         <button class="btn btn-ghost" data-act="avulso">+ Lançamento avulso</button>
         <button class="btn btn-primary" data-act="lote">+ Lançamento em lote</button>
       </div>
@@ -63,7 +64,11 @@ export async function renderLancamentos(app) {
         || (l.periodoLabel || "").toLowerCase().includes(termo);
       const okParceiro = !filtroParceiro || l.parceiroId === filtroParceiro;
       return okBusca && okParceiro;
-    }).sort((a, b) => (b.dataInicio || "").localeCompare(a.dataInicio || ""));
+    }).sort((a, b) => {
+      const nomeA = porId[a.parceiroId]?.nome || "";
+      const nomeB = porId[b.parceiroId]?.nome || "";
+      return nomeA.localeCompare(nomeB, "pt-BR") || (a.dataInicio || "").localeCompare(b.dataInicio || "");
+    });
 
     lista.innerHTML = arr.length
       ? arr.map((l) => row(l, porId[l.parceiroId])).join("")
@@ -77,6 +82,7 @@ export async function renderLancamentos(app) {
   app.querySelector(".page-head .toolbar").addEventListener("click", (e) => {
     if (e.target.closest("[data-act='lote']")) return abrirLancamentoLote();
     if (e.target.closest("[data-act='avulso']")) return abrirNovoLancamento();
+    if (e.target.closest("[data-act='loja']")) return abrirFaturamentoLoja();
   });
 
   lista.addEventListener("click", async (e) => {

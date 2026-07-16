@@ -118,6 +118,62 @@ export async function abrirFecharParceria(parceiro) {
   });
 }
 
+/* ---------------- Novo parceiro (direto, sem passar por prospecção) ---------------- */
+export async function abrirNovoParceiro() {
+  const listas = await store.getListas();
+  openModal({
+    title: "Novo parceiro",
+    submitLabel: "Adicionar",
+    wide: true,
+    bodyHtml: `
+      <div class="field-2col">
+        ${fieldSelect("area", "Área", listas.areas, { value: listas.areas[0] })}
+        ${fieldSelect("tipo", "Tipo de negócio", listas.tipoNegocio, { value: listas.tipoNegocio[0]?.valor })}
+      </div>
+      ${fieldText("nome", "Nome do negócio", { required: true, value: "", placeholder: "Ex.: Salus Flamengo" })}
+      ${fieldText("local", "Local / endereço", { value: "", placeholder: "Ex.: Praia do Flamengo, 154" })}
+      <div class="field-2col">
+        ${fieldText("responsavel", "Responsável", { value: "", placeholder: "Nome de contato" })}
+        ${fieldText("contato", "Contato", { value: "", placeholder: "Telefone ou e-mail" })}
+      </div>
+      <div class="field-2col">
+        ${fieldText("cupom", "Código do cupom", { required: true, value: "", placeholder: "Ex.: SALUS2V" })}
+        ${fieldSelect("statusCupom", "Status do cupom", listas.statusCupom, { value: "Ativo" })}
+      </div>
+      ${fieldText("periodoDesconto", "Período de desconto", { value: "", placeholder: "Ex.: 50% até 15/05 / 20% até 31/08" })}
+      <div class="field-2col">
+        ${fieldText("dataInicio", "Início da vigência", { type: "date", value: "" })}
+        ${fieldText("dataVencimento", "Vencimento", { type: "date", value: "" })}
+      </div>
+      ${fieldTextarea("observacoes", "Observações", { value: "" })}
+    `,
+    onSubmit: async (form) => {
+      const nome = readValue(form, "nome");
+      const cupom = readValue(form, "cupom");
+      if (!nome) throw new Error("Informe o nome do negócio.");
+      if (!cupom) throw new Error("Informe o código do cupom.");
+      const novo = await store.addParceiro({
+        area: readValue(form, "area"),
+        tipo: readValue(form, "tipo"),
+        nome,
+        local: readValue(form, "local"),
+        responsavel: readValue(form, "responsavel"),
+        contato: readValue(form, "contato"),
+        statusProspeccao: "Cadastrado",
+      });
+      await store.fecharParceria(novo.id, {
+        cupom,
+        statusCupom: readValue(form, "statusCupom"),
+        periodoDesconto: readValue(form, "periodoDesconto"),
+        dataInicio: readValue(form, "dataInicio"),
+        dataVencimento: readValue(form, "dataVencimento"),
+        observacoes: readValue(form, "observacoes"),
+      });
+      avisarMudanca();
+    },
+  });
+}
+
 /* ---------------- Editar parceiro fechado (dados-base + cupom) ---------------- */
 export async function abrirEditarParceiro(parceiro) {
   const listas = await store.getListas();
@@ -173,10 +229,10 @@ export async function abrirEditarParceiro(parceiro) {
   });
 }
 
-/* seletor de parceiro/cupom — value = id do parceiro, texto = "Nome — CUPOM" */
+/* seletor de parceiro/cupom — value = id do parceiro, texto = "CUPOM — Nome" */
 function selectParceiroHtml(parceiros, value) {
   const opts = parceiros.map((p) =>
-    `<option value="${esc(p.id)}" ${p.id === value ? "selected" : ""}>${esc(p.nome)} — ${esc(p.cupom)}</option>`
+    `<option value="${esc(p.id)}" ${p.id === value ? "selected" : ""}>${esc(p.cupom)} — ${esc(p.nome)}</option>`
   ).join("");
   return `<div class="field">
     <label for="f_parceiroId">Parceiro / cupom *</label>
@@ -186,7 +242,8 @@ function selectParceiroHtml(parceiros, value) {
 
 /* ---------------- Lançamento avulso (Base de Dados de 1 parceiro) ---------------- */
 export async function abrirNovoLancamento(parceiroIdSugerido = "", existente = null) {
-  const parceiros = await store.listParceirosFechados();
+  const parceiros = (await store.listParceirosFechados())
+    .sort((a, b) => (a.cupom || "").localeCompare(b.cupom || "", "pt-BR"));
   if (!parceiros.length) {
     alert("Feche pelo menos uma parceria (com cupom) antes de lançar dados de desempenho.");
     return;
@@ -247,19 +304,71 @@ export async function abrirNovoLancamento(parceiroIdSugerido = "", existente = n
    tempo, e lança tudo de uma vez aqui. */
 function loteRowHtml(parceiros, valores = {}) {
   const opts = parceiros.map((p) =>
-    `<option value="${esc(p.id)}" ${p.id === valores.parceiroId ? "selected" : ""}>${esc(p.nome)} — ${esc(p.cupom)}</option>`
+    `<option value="${esc(p.id)}" ${p.id === valores.parceiroId ? "selected" : ""}>${esc(p.cupom)} — ${esc(p.nome)}</option>`
   ).join("");
   return `<div class="lote-row" data-row>
     <select class="input lote-parceiro">${opts}</select>
     <input class="input lote-uso" type="number" min="0" placeholder="Uso" value="${valores.quantidadeUso ?? ""}">
     <input class="input lote-fat" type="number" min="0" step="0.01" placeholder="Faturamento cupom (R$)" value="${valores.faturamentoCupom ?? ""}">
-    <input class="input lote-total" type="number" min="0" step="0.01" placeholder="Faturamento total (R$)" value="${valores.faturamentoTotal ?? ""}">
     <button type="button" class="icon-btn danger lote-remove" title="Remover linha">🗑</button>
   </div>`;
 }
 
+/* ---------------- Faturamento da loja (avulso, sem cupom) ----------------
+   Valor agregado de faturamento total do período (ex.: "FAT. LOJA" do
+   relatório), sem vínculo com um cupom/parceiro específico. Gravado como
+   um lançamento comum, num parceiro-bucket dedicado ("Loja (faturamento
+   total)", cupom LOJA-TOTAL), criado sob demanda na primeira vez. */
+const CUPOM_LOJA_TOTAL = "LOJA-TOTAL";
+async function parceiroLojaTotal() {
+  const existente = (await store.listParceirosFechados()).find((p) => p.cupom === CUPOM_LOJA_TOTAL);
+  if (existente) return existente;
+  const novo = await store.addParceiro({ nome: "Loja (faturamento total)", statusProspeccao: "Cadastrado" });
+  return store.fecharParceria(novo.id, { cupom: CUPOM_LOJA_TOTAL, statusCupom: "Ativo" });
+}
+
+export async function abrirFaturamentoLoja() {
+  const hoje = new Date().toISOString().slice(0, 10);
+  openModal({
+    title: "Faturamento da loja",
+    subtitle: "Valor total do período, sem vínculo com um cupom específico",
+    submitLabel: "Adicionar",
+    bodyHtml: `
+      ${fieldSelect("periodoTipo", "Tipo de período (duração)", PERIODO_TIPOS, { value: "Semana" })}
+      <div class="field-2col">
+        ${fieldText("dataInicio", "Início do período", { type: "date", required: true, value: hoje })}
+        ${fieldText("dataFim", "Fim do período", { type: "date", required: true, value: hoje })}
+      </div>
+      ${fieldText("periodoLabel", "Rótulo do período", { hint: "Preenchido automaticamente a partir do tipo e das datas — pode editar se quiser." })}
+      ${fieldText("faturamentoTotal", "Faturamento total da loja (R$)", { type: "number", required: true, placeholder: "Ex.: 84281.93" })}
+    `,
+    onMount: (form) => wirePeriodo(form),
+    onSubmit: async (form) => {
+      const dataInicio = readValue(form, "dataInicio");
+      const dataFim = readValue(form, "dataFim");
+      const faturamentoTotal = readValue(form, "faturamentoTotal");
+      if (!dataInicio) throw new Error("Informe o início do período.");
+      if (!dataFim) throw new Error("Informe o fim do período.");
+      if (!faturamentoTotal) throw new Error("Informe o faturamento total da loja.");
+      const parceiro = await parceiroLojaTotal();
+      await store.addLancamento({
+        parceiroId: parceiro.id,
+        dataInicio,
+        dataFim,
+        periodoTipo: PERIODO_MAP[readValue(form, "periodoTipo")] || "dia",
+        periodoLabel: readValue(form, "periodoLabel"),
+        quantidadeUso: 0,
+        faturamentoCupom: 0,
+        faturamentoTotal,
+      });
+      avisarMudanca();
+    },
+  });
+}
+
 export async function abrirLancamentoLote() {
-  const parceiros = await store.listParceirosFechados();
+  const parceiros = (await store.listParceirosFechados())
+    .sort((a, b) => (a.cupom || "").localeCompare(b.cupom || "", "pt-BR"));
   if (!parceiros.length) {
     alert("Feche pelo menos uma parceria (com cupom) antes de lançar dados de desempenho.");
     return;
@@ -280,7 +389,7 @@ export async function abrirLancamentoLote() {
       </div>
       ${fieldText("periodoLabel", "Rótulo do período", { hint: "Preenchido automaticamente a partir do tipo e das datas — pode editar se quiser." })}
       <div class="field">
-        <label>Cupons do período — uso, faturamento via cupom e faturamento total de cada loja</label>
+        <label>Cupons do período — uso e faturamento via cupom de cada loja</label>
         <div id="lote-rows">
           ${Array.from({ length: linhasIniciais }).map(() => loteRowHtml(parceiros)).join("")}
         </div>
@@ -315,9 +424,8 @@ export async function abrirLancamentoLote() {
         const parceiroId = row.querySelector(".lote-parceiro").value;
         const quantidadeUso = row.querySelector(".lote-uso").value;
         const faturamentoCupom = row.querySelector(".lote-fat").value;
-        const faturamentoTotal = row.querySelector(".lote-total").value;
-        if (!parceiroId || (!quantidadeUso && !faturamentoCupom && !faturamentoTotal)) return;
-        linhas.push({ parceiroId, dataInicio, dataFim, periodoTipo, periodoLabel, quantidadeUso, faturamentoCupom, faturamentoTotal });
+        if (!parceiroId || (!quantidadeUso && !faturamentoCupom)) return;
+        linhas.push({ parceiroId, dataInicio, dataFim, periodoTipo, periodoLabel, quantidadeUso, faturamentoCupom });
       });
       if (!linhas.length) throw new Error("Preencha ao menos uma linha com uso ou faturamento.");
 

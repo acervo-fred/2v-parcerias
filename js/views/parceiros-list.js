@@ -4,6 +4,7 @@
 import { store } from "../data/store.js";
 import { esc } from "../ui/dom.js";
 import { badgeFromLista } from "../ui/badges.js";
+import { abrirNovoParceiro } from "./cadastros.js";
 
 export async function renderParceiros(app) {
   const [parceiros, listas] = await Promise.all([
@@ -13,6 +14,7 @@ export async function renderParceiros(app) {
 
   let busca = "";
   let filtroStatus = "Todos";
+  let ordem = "cupom";
 
   app.innerHTML = `
     <div class="page-head">
@@ -20,10 +22,17 @@ export async function renderParceiros(app) {
         <h1 class="page-title">Parceiros</h1>
         <div class="page-sub">${parceiros.length} parceiros com cupom ativo</div>
       </div>
+      <div class="toolbar">
+        <button class="btn btn-primary" data-act="novo">+ Novo parceiro</button>
+      </div>
     </div>
 
-    <div class="toolbar" style="margin-bottom:16px">
-      <input class="input" id="busca" type="search" placeholder="Buscar por nome, cupom ou responsável…" />
+    <div class="toolbar" style="margin-bottom:16px; gap:10px">
+      <input class="input" id="busca" type="search" placeholder="Buscar por nome, cupom ou responsável…" style="flex:1;min-width:200px" />
+      <select class="input" id="ordem" style="width:auto">
+        <option value="cupom">Ordenar por cupom</option>
+        <option value="nome">Ordenar por nome do parceiro</option>
+      </select>
     </div>
     <div class="filter-row" id="filtros"></div>
 
@@ -47,7 +56,9 @@ export async function renderParceiros(app) {
         || (p.responsavel || "").toLowerCase().includes(termo);
       const okStatus = filtroStatus === "Todos" || p.statusCupom === filtroStatus;
       return okBusca && okStatus;
-    }).sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+    }).sort((a, b) => ordem === "cupom"
+      ? (a.cupom || "").localeCompare(b.cupom || "", "pt-BR")
+      : a.nome.localeCompare(b.nome, "pt-BR"));
 
     lista.innerHTML = arr.length
       ? arr.map((p) => row(p, listas)).join("")
@@ -56,12 +67,17 @@ export async function renderParceiros(app) {
   desenhar();
 
   app.querySelector("#busca").addEventListener("input", (e) => { busca = e.target.value; desenhar(); });
+  app.querySelector("#ordem").addEventListener("change", (e) => { ordem = e.target.value; desenhar(); });
   filtros.addEventListener("click", (e) => {
     const chip = e.target.closest(".chip");
     if (!chip) return;
     filtroStatus = chip.dataset.status;
     filtros.querySelectorAll(".chip").forEach((c) => c.classList.toggle("active", c === chip));
     desenhar();
+  });
+
+  app.querySelector(".page-head .toolbar").addEventListener("click", (e) => {
+    if (e.target.closest("[data-act='novo']")) abrirNovoParceiro();
   });
 
   lista.addEventListener("click", (e) => {
@@ -73,7 +89,7 @@ export async function renderParceiros(app) {
 function row(p, listas) {
   return `<div class="list-row clickable" data-id="${esc(p.id)}">
     <div class="lr-main">
-      <div class="lr-title">${esc(p.nome)} <span class="muted" style="font-weight:400">· cupom ${esc(p.cupom)}</span></div>
+      <div class="lr-title">${esc(p.cupom)} <span class="muted" style="font-weight:400">— ${esc(p.nome)}</span></div>
       <div class="lr-sub">${esc([p.responsavel, p.periodoDesconto].filter(Boolean).join(" · "))}</div>
     </div>
     ${badgeFromLista(listas.statusCupom, p.statusCupom)}
