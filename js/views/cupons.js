@@ -85,6 +85,7 @@ export async function renderCupons(app) {
   let periodo = "total"; // "mes" | "total"
   let aba = "todos"; // "todos" | "1".."4"
   let busca = "";
+  const ordem = { chave: "cupom", dir: "asc" };
 
   app.innerHTML = `
     <div class="page-head">
@@ -110,7 +111,20 @@ export async function renderCupons(app) {
       <input class="input" id="busca-cupom" type="search" placeholder="Buscar por cupom…" style="flex:1;min-width:200px" />
     </div>
 
-    <div class="list-card" id="lista-cupons"></div>
+    <div class="chart-card" style="padding:0">
+      <table class="rank-table" id="tabela-cupons">
+        <thead>
+          <tr>
+            <th data-sort="cupom">Cupom</th>
+            <th data-sort="uso" class="num">Usos no período</th>
+            <th data-sort="fat" class="num">Faturamento no período</th>
+            <th>Desconto atual</th>
+            <th>Grupo</th>
+          </tr>
+        </thead>
+        <tbody id="lista-cupons"></tbody>
+      </table>
+    </div>
   `;
 
   const painel = app.querySelector("#grupo-painel");
@@ -124,15 +138,13 @@ export async function renderCupons(app) {
     if (aba === "todos") { painel.innerHTML = ""; return; }
     const g = porIdGrupo[aba];
     painel.innerHTML = `
-      <div class="chart-card" style="margin-bottom:16px">
-        <h3 style="margin-bottom:14px">Período de desconto especial (50%) — ${esc(g.nome)}</h3>
-        <p class="muted" style="font-size:12.5px;margin:-8px 0 14px">Fora desse período, os cupons deste grupo ficam nos 20% padrão.</p>
-        <div class="field-2col">
-          <div class="field"><label>Início</label><input class="input" type="date" id="grp-inicio" value="${g.inicio || ""}"></div>
-          <div class="field"><label>Fim</label><input class="input" type="date" id="grp-fim" value="${g.fim || ""}"></div>
-        </div>
-        <button class="btn btn-primary btn-sm" id="grp-salvar">Salvar período do grupo</button>
-        <span class="muted" id="grp-salvo" style="font-size:12.5px;margin-left:10px"></span>
+      <div class="toolbar" style="margin-bottom:16px; gap:10px; flex-wrap:wrap">
+        <strong style="font-size:13.5px">Período desconto 50% — ${esc(g.nome)}:</strong>
+        <input class="input" type="date" id="grp-inicio" value="${g.inicio || ""}" style="width:auto">
+        <span class="muted">até</span>
+        <input class="input" type="date" id="grp-fim" value="${g.fim || ""}" style="width:auto">
+        <button class="btn btn-primary btn-sm" id="grp-salvar">Salvar</button>
+        <span class="muted" id="grp-salvo" style="font-size:12px"></span>
       </div>
     `;
     painel.querySelector("#grp-salvar").addEventListener("click", async () => {
@@ -148,7 +160,7 @@ export async function renderCupons(app) {
     });
   }
 
-  function desenharLista() {
+  function linhasVisiveis() {
     const [de, ate] = periodoAtual();
     const stats = statsPorParceiro(lancamentos, de, ate);
     const termo = busca.trim().toLowerCase();
@@ -156,28 +168,47 @@ export async function renderCupons(app) {
     const arr = parceiros
       .filter((p) => (aba === "todos" || String(p.grupoCupom || "") === aba))
       .filter((p) => !termo || (p.cupom || "").toLowerCase().includes(termo))
-      .sort((a, b) => (a.cupom || "").localeCompare(b.cupom || "", "pt-BR"));
+      .map((p) => ({ p, uso: stats.get(p.id)?.uso || 0, fat: stats.get(p.id)?.fat || 0 }));
 
-    lista.innerHTML = arr.length
-      ? arr.map((p) => rowHtml(p, stats.get(p.id))).join("")
-      : `<div class="empty">Nenhum cupom encontrado.</div>`;
+    const mul = ordem.dir === "asc" ? 1 : -1;
+    const val = (l) => {
+      if (ordem.chave === "uso") return l.uso;
+      if (ordem.chave === "fat") return l.fat;
+      return (l.p.cupom || "").toLowerCase();
+    };
+    return arr.sort((a, b) => {
+      const va = val(a), vb = val(b);
+      if (typeof va === "string") return va.localeCompare(vb, "pt-BR") * mul;
+      return (va - vb) * mul;
+    });
   }
 
-  function rowHtml(p, st) {
-    const uso = st?.uso || 0;
-    const fat = st?.fat || 0;
+  function desenharLista() {
+    const arr = linhasVisiveis();
+    lista.innerHTML = arr.length
+      ? arr.map((l) => rowHtml(l.p, l.uso, l.fat)).join("")
+      : `<tr><td colspan="5" class="empty">Nenhum cupom encontrado.</td></tr>`;
+
+    app.querySelectorAll("#tabela-cupons th[data-sort]").forEach((th) => {
+      th.classList.toggle("sort-active", th.dataset.sort === ordem.chave);
+      th.dataset.sortDir = th.dataset.sort === ordem.chave ? ordem.dir : "";
+    });
+  }
+
+  function rowHtml(p, uso, fat) {
     const desconto = descontoAtual(p, porIdGrupo);
-    return `<div class="list-row">
-      <div class="lr-main">
-        <a href="#/parceiro/${esc(p.id)}" class="lr-title" style="color:var(--accent)">${esc(p.cupom)}</a>
-        <div class="lr-sub">${uso} usos · ${esc(formatMoeda(fat))} via cupom</div>
-      </div>
-      <span class="badge ${desconto === DESCONTO_ESPECIAL ? "badge--amber" : "badge--gray"}" title="Desconto atual">${desconto}%</span>
-      <select class="input cupom-grupo" data-id="${esc(p.id)}" style="width:140px">
-        <option value="">Sem grupo</option>
-        ${grupos.map((g) => `<option value="${g.numero}" ${String(p.grupoCupom || "") === String(g.numero) ? "selected" : ""}>${esc(g.nome)}</option>`).join("")}
-      </select>
-    </div>`;
+    return `<tr>
+      <td><a href="#/parceiro/${esc(p.id)}" style="color:var(--accent);font-weight:700">${esc(p.cupom)}</a></td>
+      <td class="num">${uso}</td>
+      <td class="num">${esc(formatMoeda(fat))}</td>
+      <td><span class="badge ${desconto === DESCONTO_ESPECIAL ? "badge--amber" : "badge--gray"}" title="Desconto atual">${desconto}%</span></td>
+      <td>
+        <select class="input cupom-grupo" data-id="${esc(p.id)}" style="width:140px">
+          <option value="">Sem grupo</option>
+          ${grupos.map((g) => `<option value="${g.numero}" ${String(p.grupoCupom || "") === String(g.numero) ? "selected" : ""}>${esc(g.nome)}</option>`).join("")}
+        </select>
+      </td>
+    </tr>`;
   }
 
   desenharPainel();
@@ -201,6 +232,15 @@ export async function renderCupons(app) {
   });
 
   app.querySelector("#busca-cupom").addEventListener("input", (e) => { busca = e.target.value; desenharLista(); });
+
+  app.querySelector("#tabela-cupons thead").addEventListener("click", (e) => {
+    const th = e.target.closest("th[data-sort]");
+    if (!th) return;
+    const chave = th.dataset.sort;
+    if (ordem.chave === chave) ordem.dir = ordem.dir === "asc" ? "desc" : "asc";
+    else { ordem.chave = chave; ordem.dir = "desc"; }
+    desenharLista();
+  });
 
   lista.addEventListener("change", async (e) => {
     const grupoSel = e.target.closest(".cupom-grupo");
