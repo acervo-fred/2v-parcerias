@@ -1,9 +1,10 @@
 /* Cupons — percentual de desconto, período de validade e grupos de
-   cada cupom. Estratégia de aumento do percentual em grupos: cada
-   grupo (1-4) tem seu próprio período de desconto especial (50%),
-   escalonado; o desconto padrão (20%) fica valendo o resto do tempo.
-   Uso/faturamento por cupom, filtrado por período, pra acompanhar o
-   desempenho de cada grupo. */
+   cada cupom. O desconto de um cupom só pode ser 20% (padrão) ou 50%
+   (especial) — nunca um valor livre. Estratégia de aumento em grupos:
+   cada grupo (1-4) tem seu próprio período de desconto especial,
+   escalonado; enquanto a data de hoje não estiver dentro do período do
+   grupo, o cupom fica nos 20% padrão. Uso/faturamento por cupom,
+   filtrado por período, pra acompanhar o desempenho de cada grupo. */
 
 import { store } from "../data/store.js";
 import { esc, formatMoeda } from "../ui/dom.js";
@@ -11,6 +12,8 @@ import { dedupLancamentos, lancamentoNoPeriodo } from "../util/periodo.js";
 import { openModal } from "../ui/modal.js";
 
 const NUM_GRUPOS = 4;
+const DESCONTO_PADRAO = 20;
+const DESCONTO_ESPECIAL = 50;
 
 function hojeISO() { return new Date().toISOString().slice(0, 10); }
 function isoMenosDias(dias) {
@@ -25,7 +28,7 @@ async function garantirGrupos() {
   if (grupos.length === 0) {
     grupos = [];
     for (let n = 1; n <= NUM_GRUPOS; n++) {
-      const novo = await store.addGrupo({ numero: n, nome: `Grupo ${n}`, descontoEspecial: 50, inicio: "", fim: "" });
+      const novo = await store.addGrupo({ numero: n, nome: `Grupo ${n}`, inicio: "", fim: "" });
       grupos.push(novo);
     }
   }
@@ -44,6 +47,17 @@ function distribuirEmGrupos(parceiros, lancamentos) {
   jaUsados.forEach((p, i) => porGrupo[(i % NUM_GRUPOS) + 1].push(p.id));
   naoUsados.forEach((p, i) => porGrupo[(i % NUM_GRUPOS) + 1].push(p.id));
   return porGrupo;
+}
+
+// 20% por padrão; 50% só enquanto hoje estiver dentro do período
+// especial configurado no grupo do cupom
+function descontoAtual(p, porIdGrupo) {
+  const g = porIdGrupo[String(p.grupoCupom || "")];
+  if (g && g.inicio && g.fim) {
+    const hoje = hojeISO();
+    if (hoje >= g.inicio && hoje <= g.fim) return DESCONTO_ESPECIAL;
+  }
+  return DESCONTO_PADRAO;
 }
 
 function statsPorParceiro(lancamentos, de, ate) {
@@ -76,7 +90,7 @@ export async function renderCupons(app) {
     <div class="page-head">
       <div>
         <h1 class="page-title">Cupons</h1>
-        <div class="page-sub">${parceiros.length} cupons · percentual, período e grupos de desconto</div>
+        <div class="page-sub">${parceiros.length} cupons · 20% padrão ou 50% no período especial de cada grupo</div>
       </div>
       <div class="filter-row" id="periodo-cupons" style="margin-bottom:0">
         <button class="chip" data-p="mes">Último mês</button>
@@ -111,11 +125,8 @@ export async function renderCupons(app) {
     const g = porIdGrupo[aba];
     painel.innerHTML = `
       <div class="chart-card" style="margin-bottom:16px">
-        <h3 style="margin-bottom:14px">Período de desconto especial — ${esc(g.nome)}</h3>
-        <div class="field-2col">
-          <div class="field"><label>Desconto especial (%)</label><input class="input" type="number" min="0" max="100" id="grp-desconto" value="${g.descontoEspecial ?? 50}"></div>
-          <div></div>
-        </div>
+        <h3 style="margin-bottom:14px">Período de desconto especial (50%) — ${esc(g.nome)}</h3>
+        <p class="muted" style="font-size:12.5px;margin:-8px 0 14px">Fora desse período, os cupons deste grupo ficam nos 20% padrão.</p>
         <div class="field-2col">
           <div class="field"><label>Início</label><input class="input" type="date" id="grp-inicio" value="${g.inicio || ""}"></div>
           <div class="field"><label>Fim</label><input class="input" type="date" id="grp-fim" value="${g.fim || ""}"></div>
@@ -126,7 +137,6 @@ export async function renderCupons(app) {
     `;
     painel.querySelector("#grp-salvar").addEventListener("click", async () => {
       const campos = {
-        descontoEspecial: Number(painel.querySelector("#grp-desconto").value) || 0,
         inicio: painel.querySelector("#grp-inicio").value,
         fim: painel.querySelector("#grp-fim").value,
       };
@@ -134,6 +144,7 @@ export async function renderCupons(app) {
       Object.assign(g, campos);
       painel.querySelector("#grp-salvo").textContent = "✓ salvo";
       setTimeout(() => { const s = painel.querySelector("#grp-salvo"); if (s) s.textContent = ""; }, 2000);
+      desenharLista(); // o desconto atual de cada linha pode ter mudado
     });
   }
 
@@ -155,14 +166,13 @@ export async function renderCupons(app) {
   function rowHtml(p, st) {
     const uso = st?.uso || 0;
     const fat = st?.fat || 0;
+    const desconto = descontoAtual(p, porIdGrupo);
     return `<div class="list-row">
       <div class="lr-main">
         <a href="#/parceiro/${esc(p.id)}" class="lr-title" style="color:var(--accent)">${esc(p.cupom)}</a>
         <div class="lr-sub">${uso} usos · ${esc(formatMoeda(fat))} via cupom</div>
       </div>
-      <div class="field" style="margin:0;width:90px">
-        <input class="input cupom-desconto" type="number" min="0" max="100" step="1" data-id="${esc(p.id)}" value="${p.descontoPadrao ?? 20}" title="Desconto padrão (%)">
-      </div>
+      <span class="badge ${desconto === DESCONTO_ESPECIAL ? "badge--amber" : "badge--gray"}" title="Desconto atual">${desconto}%</span>
       <select class="input cupom-grupo" data-id="${esc(p.id)}" style="width:140px">
         <option value="">Sem grupo</option>
         ${grupos.map((g) => `<option value="${g.numero}" ${String(p.grupoCupom || "") === String(g.numero) ? "selected" : ""}>${esc(g.nome)}</option>`).join("")}
@@ -193,15 +203,7 @@ export async function renderCupons(app) {
   app.querySelector("#busca-cupom").addEventListener("input", (e) => { busca = e.target.value; desenharLista(); });
 
   lista.addEventListener("change", async (e) => {
-    const desconto = e.target.closest(".cupom-desconto");
     const grupoSel = e.target.closest(".cupom-grupo");
-    if (desconto) {
-      const id = desconto.dataset.id;
-      const valor = Number(desconto.value) || 0;
-      await store.updateParceiro(id, { descontoPadrao: valor });
-      const p = parceiros.find((x) => x.id === id);
-      if (p) p.descontoPadrao = valor;
-    }
     if (grupoSel) {
       const id = grupoSel.dataset.id;
       const valor = grupoSel.value ? Number(grupoSel.value) : "";
@@ -220,8 +222,8 @@ export async function renderCupons(app) {
       bodyHtml: `<p style="font-size:13.5px;color:var(--text-soft);line-height:1.6">
         Isso substitui o grupo atual de cada cupom. Os cupons já usados ficam
         espalhados igualmente entre os 4 grupos (mesma proporção em cada um),
-        e o resto preenche o espaço restante. Não afeta o desconto padrão nem
-        o período especial já configurado em cada grupo.
+        e o resto preenche o espaço restante. Não afeta o período especial já
+        configurado em cada grupo.
       </p>`,
       onSubmit: async () => {
         const porGrupo = distribuirEmGrupos(parceiros, lancamentos);
