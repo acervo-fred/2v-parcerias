@@ -427,6 +427,8 @@ button { font: inherit; }
 .rank-table td { font-variant-numeric: tabular-nums; }
 .rank-table td.empty, .rank-table .empty { text-align: center; }
 
+#tabela-cupons th, #tabela-cupons td { text-align: center; }
+
 /* ---- participação por cupom (barra empilhada + legenda) ---- */
 .viz-stack-bar {
   display: flex; height: 22px; border-radius: 999px; overflow: hidden;
