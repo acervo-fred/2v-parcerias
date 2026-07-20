@@ -3,6 +3,7 @@
 import { renderProspeccao } from "./views/prospeccao.js";
 import { renderParceiros } from "./views/parceiros-list.js";
 import { renderParceiro } from "./views/parceiro.js";
+import { renderCupons } from "./views/cupons.js";
 import { renderLancamentos } from "./views/lancamentos.js";
 import { renderDashboard } from "./views/dashboard.js";
 import { renderBackup } from "./views/backup.js";
@@ -41,6 +42,10 @@ async function router() {
       case "parceiro":
         setActiveNav("parceiros");
         await renderParceiro(app, param);
+        break;
+      case "cupons":
+        setActiveNav("cupons");
+        await renderCupons(app);
         break;
       case "lancamentos":
         setActiveNav("lancamentos");

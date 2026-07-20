@@ -25,6 +25,7 @@ service cloud.firestore {
     match /lancamentos/{document=**}  { allow read, write: if devAberto(); }
     match /config/{document=**}       { allow read, write: if devAberto(); }
     match /lojas/{document=**}        { allow read, write: if devAberto(); }
+    match /grupos/{document=**}       { allow read, write: if devAberto(); }
 
     // Nada mais é exposto.
   }

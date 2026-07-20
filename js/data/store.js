@@ -25,6 +25,7 @@ function estadoInicial() {
     lancamentos: structuredClone(mock.lancamentos),
     listas: structuredClone(mock.listas),
     lojas: [],
+    grupos: [],
   };
 }
 
@@ -39,6 +40,7 @@ function carregar() {
 }
 
 const db = carregar();
+if (!db.grupos) db.grupos = [];
 
 function persistir() {
   try {
@@ -120,6 +122,20 @@ const localStore = {
     persistir();
     return structuredClone(novo);
   },
+
+  /* ---------- grupos de cupons ---------- */
+  async listGrupos() {
+    const lojaId = await lojaAtualIdOuErro();
+    return structuredClone(db.grupos.filter((g) => g.lojaId === lojaId));
+  },
+  async addGrupo(dados) {
+    const lojaId = await lojaAtualIdOuErro();
+    const novo = { id: novoId("gp"), lojaId, ...dados };
+    db.grupos.push(novo);
+    persistir();
+    return structuredClone(novo);
+  },
+  async updateGrupo(id, campos) { return atualizar(db.grupos, id, campos); },
 
   /* ---------- listas de configuração ---------- */
   async getListas() { return structuredClone(db.listas); },

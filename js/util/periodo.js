@@ -61,6 +61,45 @@ export function calcularRotulo(tipo, dataInicio, dataFim) {
   return `${inicioCurto} – ${fimFmt}`;
 }
 
+/* Remove duplicidade: quando o mesmo parceiro (cupom) tem dois ou mais
+   lançamentos com período SOBREPOSTO (ex.: um "01 a 10/jul" e depois um
+   "01 a 14/jul" que já inclui aquele mesmo início — relatório parcial e
+   completo do mesmo intervalo), mantém só o de maior valor (cupom +
+   total + uso somados) do grupo que se sobrepõe, descarta o resto.
+   Não exige data de início/fim idênticas — cobre também o caso comum de
+   um período mais curto contido dentro de um mais longo.
+   Usado nas agregações (Dashboard, stats), nunca na listagem bruta da
+   Base de Dados — lá o usuário precisa ver e poder excluir a duplicata
+   manualmente se quiser. */
+export function dedupLancamentos(lista) {
+  const peso = (l) => (l.faturamentoCupom || 0) + (l.faturamentoTotal || 0) + (l.quantidadeUso || 0);
+  const porParceiro = new Map();
+  for (const l of lista) {
+    if (!porParceiro.has(l.parceiroId)) porParceiro.set(l.parceiroId, []);
+    porParceiro.get(l.parceiroId).push(l);
+  }
+
+  const resultado = [];
+  for (const lancs of porParceiro.values()) {
+    const ordenados = [...lancs].sort((a, b) => (a.dataInicio || "").localeCompare(b.dataInicio || ""));
+    const clusters = [];
+    for (const l of ordenados) {
+      const ultimo = clusters[clusters.length - 1];
+      const fim = l.dataFim || l.dataInicio || "";
+      if (ultimo && (l.dataInicio || "") <= ultimo.fimMax) {
+        ultimo.itens.push(l);
+        if (fim > ultimo.fimMax) ultimo.fimMax = fim;
+      } else {
+        clusters.push({ itens: [l], fimMax: fim });
+      }
+    }
+    for (const c of clusters) {
+      resultado.push(c.itens.reduce((melhor, l) => (peso(l) > peso(melhor) ? l : melhor)));
+    }
+  }
+  return resultado;
+}
+
 /* Overlap entre o intervalo do lançamento e o período [de, ate]
    escolhido no Dashboard — em vez de comparar uma única data,
    garante que qualquer lançamento cujo período toque o filtro

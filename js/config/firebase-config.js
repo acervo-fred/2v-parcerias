@@ -30,4 +30,5 @@ export const COLLECTIONS = {
   lancamentos: "lancamentos",
   config: "config", // doc "listas" guarda todas as listas editáveis
   lojas: "lojas", // cada loja tem parceiros/lançamentos próprios (campo lojaId)
+  grupos: "grupos", // grupos de cupons (1-4), com período de desconto especial próprio — também por lojaId
 };

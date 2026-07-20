@@ -88,6 +88,22 @@ export const firestoreStore = {
     return { id: ref.id, ...novo };
   },
 
+  /* ---------- grupos de cupons ---------- */
+  async listGrupos() {
+    const lojaId = await lojaAtualIdOuErro();
+    return docsWhere(COLLECTIONS.grupos, "lojaId", lojaId);
+  },
+  async addGrupo(dados) {
+    const lojaId = await lojaAtualIdOuErro();
+    const novo = { lojaId, ...dados };
+    const ref = await addDoc(collection(fdb, COLLECTIONS.grupos), novo);
+    return { id: ref.id, ...novo };
+  },
+  async updateGrupo(id, campos) {
+    await updateDoc(doc(fdb, COLLECTIONS.grupos, id), campos);
+    return { id, ...campos };
+  },
+
   /* ---------- listas de configuração ---------- */
   async getListas() {
     const snap = await getDoc(doc(fdb, COLLECTIONS.config, "listas"));

@@ -16,7 +16,7 @@
 
 import { store } from "../data/store.js";
 import { esc, formatMoeda } from "../ui/dom.js";
-import { lancamentoNoPeriodo } from "../util/periodo.js";
+import { lancamentoNoPeriodo, dedupLancamentos } from "../util/periodo.js";
 
 const MES_NOMES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
 const TOP_N_CUPONS = 8;
@@ -25,12 +25,14 @@ const CORES_CATEGORICAS = ["#2a78d6", "#1baf7a", "#eda100", "#008300", "#4a3aa7"
 const COR_OUTROS = "var(--c-gray-fg)";
 
 export async function renderDashboard(app) {
-  const [lancamentos, parceiros, listas, lojaAtual] = await Promise.all([
+  const [lancamentosBrutos, parceiros, listas, lojaAtual] = await Promise.all([
     store.listLancamentos(),
     store.listParceirosFechados(),
     store.getListas(),
     store.getLojaAtual(),
   ]);
+  // mesmo parceiro+data lançado mais de uma vez → conta só o maior, não os dois
+  const lancamentos = dedupLancamentos(lancamentosBrutos);
   const porId = Object.fromEntries(parceiros.map((p) => [p.id, p]));
   const parceirosOrdenados = [...parceiros].sort((a, b) => (a.cupom || "").localeCompare(b.cupom || "", "pt-BR"));
   const mesesComDados = [...new Set(lancamentos.map((l) => (l.dataInicio || "").slice(0, 7)).filter(Boolean))].sort();

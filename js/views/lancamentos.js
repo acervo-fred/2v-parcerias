@@ -6,6 +6,7 @@
 import { store } from "../data/store.js";
 import { esc, formatMoeda, formatDataBR } from "../ui/dom.js";
 import { abrirLancamentoLote, abrirNovoLancamento, abrirFaturamentoLoja } from "./cadastros.js";
+import { dedupLancamentos } from "../util/periodo.js";
 
 export async function renderLancamentos(app) {
   const [lancamentos, parceiros] = await Promise.all([
@@ -17,8 +18,12 @@ export async function renderLancamentos(app) {
   let busca = "";
   let filtroParceiro = "";
 
-  const totalUso = lancamentos.reduce((s, l) => s + l.quantidadeUso, 0);
-  const totalCupom = lancamentos.reduce((s, l) => s + l.faturamentoCupom, 0);
+  // os totais do topo não contam duplicata (mesmo parceiro+data) duas vezes,
+  // mas a lista abaixo continua mostrando todos os lançamentos de verdade —
+  // se houver duplicata, dá pra ver e excluir manualmente
+  const semDuplicata = dedupLancamentos(lancamentos);
+  const totalUso = semDuplicata.reduce((s, l) => s + l.quantidadeUso, 0);
+  const totalCupom = semDuplicata.reduce((s, l) => s + l.faturamentoCupom, 0);
 
   app.innerHTML = `
     <div class="page-head">

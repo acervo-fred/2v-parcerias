@@ -13,6 +13,7 @@ import { store } from "../data/store.js";
 import { esc, formatMoeda, formatDataBR } from "../ui/dom.js";
 import { badge, badgeFromLista } from "../ui/badges.js";
 import { abrirEditarParceiro, abrirNovoLancamento } from "./cadastros.js";
+import { dedupLancamentos } from "../util/periodo.js";
 
 const PERIODO_LABEL = { dia: "Dia", semana: "Semana", mes: "Mês", personalizado: "Personalizado" };
 
@@ -29,13 +30,18 @@ export async function renderParceiro(app, id) {
     store.lancamentosDoParceiro(id),
   ]);
 
-  const totalUso = lancamentos.reduce((s, l) => s + l.quantidadeUso, 0);
-  const totalCupom = lancamentos.reduce((s, l) => s + l.faturamentoCupom, 0);
-  const totalSemCupom = lancamentos.reduce((s, l) => s + l.faturamentoSemCupom, 0);
+  // mesma data lançada mais de uma vez pra este parceiro → conta só a
+  // maior nas estatísticas/gráfico (a lista abaixo continua mostrando
+  // tudo, pra dar pra ver e excluir a duplicata manualmente)
+  const lancamentosStats = dedupLancamentos(lancamentos);
+
+  const totalUso = lancamentosStats.reduce((s, l) => s + l.quantidadeUso, 0);
+  const totalCupom = lancamentosStats.reduce((s, l) => s + l.faturamentoCupom, 0);
+  const totalSemCupom = lancamentosStats.reduce((s, l) => s + l.faturamentoSemCupom, 0);
   const ticketMedioGeral = totalUso > 0 ? totalCupom / totalUso : 0;
 
   // comparação: lançamento mais recente vs. o imediatamente anterior
-  const porData = [...lancamentos].sort((a, b) => (b.dataInicio || "").localeCompare(a.dataInicio || ""));
+  const porData = [...lancamentosStats].sort((a, b) => (b.dataInicio || "").localeCompare(a.dataInicio || ""));
   const atual = porData[0], anterior = porData[1];
   const comparavel = Boolean(atual && anterior);
   const deltaUso = comparavel ? pctDelta(atual.quantidadeUso, anterior.quantidadeUso) : undefined;
@@ -43,7 +49,7 @@ export async function renderParceiro(app, id) {
   const deltaTicket = comparavel ? pctDelta(atual.ticketMedio, anterior.ticketMedio) : undefined;
 
   // evolução: um ponto por lançamento, do mais antigo ao mais recente
-  const pontosEvolucao = [...lancamentos]
+  const pontosEvolucao = [...lancamentosStats]
     .sort((a, b) => (a.dataInicio || "").localeCompare(b.dataInicio || ""))
     .map((l) => ({ label: l.periodoLabel || formatDataBR(l.dataInicio), value: l.faturamentoCupom }));
 
