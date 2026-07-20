@@ -7,7 +7,7 @@
    filtrado por período, pra acompanhar o desempenho de cada grupo. */
 
 import { store } from "../data/store.js";
-import { esc, formatMoeda } from "../ui/dom.js";
+import { esc, formatMoeda, formatDataBR } from "../ui/dom.js";
 import { dedupLancamentos, lancamentoNoPeriodo } from "../util/periodo.js";
 import { openModal } from "../ui/modal.js";
 
@@ -49,15 +49,17 @@ function distribuirEmGrupos(parceiros, lancamentos) {
   return porGrupo;
 }
 
-// 20% por padrão; 50% só enquanto hoje estiver dentro do período
-// especial configurado no grupo do cupom
+// 20% por padrão (dentro da vigência do próprio cupom, dataInicio/
+// dataVencimento) — 50% só enquanto hoje estiver dentro do período
+// especial configurado no grupo. Devolve também as datas de início/fim
+// de qual dos dois estiver valendo, pra mostrar na lista.
 function descontoAtual(p, porIdGrupo) {
+  const hoje = hojeISO();
   const g = porIdGrupo[String(p.grupoCupom || "")];
-  if (g && g.inicio && g.fim) {
-    const hoje = hojeISO();
-    if (hoje >= g.inicio && hoje <= g.fim) return DESCONTO_ESPECIAL;
+  if (g && g.inicio && g.fim && hoje >= g.inicio && hoje <= g.fim) {
+    return { percentual: DESCONTO_ESPECIAL, inicio: g.inicio, fim: g.fim };
   }
-  return DESCONTO_PADRAO;
+  return { percentual: DESCONTO_PADRAO, inicio: p.dataInicio || "", fim: p.dataVencimento || "" };
 }
 
 function statsPorParceiro(lancamentos, de, ate) {
@@ -119,6 +121,7 @@ export async function renderCupons(app) {
             <th data-sort="uso" class="num">Usos no período</th>
             <th data-sort="fat" class="num">Faturamento no período</th>
             <th>Desconto atual</th>
+            <th>Início – término do desconto</th>
             <th>Grupo</th>
           </tr>
         </thead>
@@ -187,7 +190,7 @@ export async function renderCupons(app) {
     const arr = linhasVisiveis();
     lista.innerHTML = arr.length
       ? arr.map((l) => rowHtml(l.p, l.uso, l.fat)).join("")
-      : `<tr><td colspan="5" class="empty">Nenhum cupom encontrado.</td></tr>`;
+      : `<tr><td colspan="6" class="empty">Nenhum cupom encontrado.</td></tr>`;
 
     app.querySelectorAll("#tabela-cupons th[data-sort]").forEach((th) => {
       th.classList.toggle("sort-active", th.dataset.sort === ordem.chave);
@@ -196,12 +199,16 @@ export async function renderCupons(app) {
   }
 
   function rowHtml(p, uso, fat) {
-    const desconto = descontoAtual(p, porIdGrupo);
-    return `<tr>
+    const d = descontoAtual(p, porIdGrupo);
+    const periodoTxt = d.inicio && d.fim
+      ? `${formatDataBR(d.inicio)} – ${formatDataBR(d.fim)}`
+      : "—";
+    return `<tr class="rank-row">
       <td><a href="#/parceiro/${esc(p.id)}" style="color:var(--accent);font-weight:700">${esc(p.cupom)}</a></td>
       <td class="num">${uso}</td>
       <td class="num">${esc(formatMoeda(fat))}</td>
-      <td><span class="badge ${desconto === DESCONTO_ESPECIAL ? "badge--amber" : "badge--gray"}" title="Desconto atual">${desconto}%</span></td>
+      <td><span class="badge ${d.percentual === DESCONTO_ESPECIAL ? "badge--amber" : "badge--gray"}" title="Desconto atual">${d.percentual}%</span></td>
+      <td class="muted" style="font-size:12.5px">${esc(periodoTxt)}</td>
       <td>
         <select class="input cupom-grupo" data-id="${esc(p.id)}" style="width:140px">
           <option value="">Sem grupo</option>
