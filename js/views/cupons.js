@@ -9,7 +9,6 @@
 import { store } from "../data/store.js";
 import { esc, formatMoeda, formatDataBR } from "../ui/dom.js";
 import { dedupLancamentos, lancamentoNoPeriodo } from "../util/periodo.js";
-import { openModal } from "../ui/modal.js";
 
 const NUM_GRUPOS = 4;
 const DESCONTO_PADRAO = 20;
@@ -35,20 +34,6 @@ async function garantirGrupos() {
   return grupos.sort((a, b) => a.numero - b.numero);
 }
 
-// separa cupons já usados (ao menos 1 lançamento com uso>0) dos que nunca
-// tiveram uso, e distribui os dois grupos em rodízio pelos 4 grupos —
-// mantém a mesma proporção de "já usados" em cada grupo
-function distribuirEmGrupos(parceiros, lancamentos) {
-  const usados = new Set(lancamentos.filter((l) => l.quantidadeUso > 0).map((l) => l.parceiroId));
-  const jaUsados = parceiros.filter((p) => usados.has(p.id));
-  const naoUsados = parceiros.filter((p) => !usados.has(p.id));
-
-  const porGrupo = { 1: [], 2: [], 3: [], 4: [] };
-  jaUsados.forEach((p, i) => porGrupo[(i % NUM_GRUPOS) + 1].push(p.id));
-  naoUsados.forEach((p, i) => porGrupo[(i % NUM_GRUPOS) + 1].push(p.id));
-  return porGrupo;
-}
-
 // 20% por padrão (dentro da vigência do próprio cupom, dataInicio/
 // dataVencimento) — 50% só enquanto hoje estiver dentro do período
 // especial configurado no grupo. Devolve também as datas de início/fim
@@ -60,6 +45,18 @@ function descontoAtual(p, porIdGrupo) {
     return { percentual: DESCONTO_ESPECIAL, inicio: g.inicio, fim: g.fim };
   }
   return { percentual: DESCONTO_PADRAO, inicio: p.dataInicio || "", fim: p.dataVencimento || "" };
+}
+
+// período correspondente a um percentual específico (20% → vigência do
+// próprio cupom, 50% → período especial configurado no grupo do cupom) —
+// usado pra alternar o texto de vigência quando o usuário troca a lista
+// suspensa de desconto, sem depender de qual dos dois está "ativo hoje".
+function periodoParaPercentual(p, porIdGrupo, percentual) {
+  if (percentual === DESCONTO_ESPECIAL) {
+    const g = porIdGrupo[String(p.grupoCupom || "")];
+    return { inicio: g?.inicio || "", fim: g?.fim || "" };
+  }
+  return { inicio: p.dataInicio || "", fim: p.dataVencimento || "" };
 }
 
 function statsPorParceiro(lancamentos, de, ate) {
@@ -104,7 +101,6 @@ export async function renderCupons(app) {
     <div class="filter-row" id="aba-grupos">
       <button class="chip active" data-aba="todos">Todos</button>
       ${grupos.map((g) => `<button class="chip" data-aba="${g.numero}">${esc(g.nome)}</button>`).join("")}
-      <button class="btn btn-ghost btn-sm" id="btn-distribuir" style="margin-left:auto">↻ Gerar divisão automática</button>
     </div>
 
     <div id="grupo-painel"></div>
@@ -198,17 +194,24 @@ export async function renderCupons(app) {
     });
   }
 
+  function fmtPeriodo(per) {
+    return per.inicio && per.fim ? `${formatDataBR(per.inicio)} – ${formatDataBR(per.fim)}` : "—";
+  }
+
   function rowHtml(p, uso, fat) {
     const d = descontoAtual(p, porIdGrupo);
-    const periodoTxt = d.inicio && d.fim
-      ? `${formatDataBR(d.inicio)} – ${formatDataBR(d.fim)}`
-      : "—";
+    const periodoTxt = fmtPeriodo(d);
     return `<tr class="rank-row">
       <td><a href="#/parceiro/${esc(p.id)}" style="color:var(--accent);font-weight:700">${esc(p.cupom)}</a></td>
       <td class="num">${uso}</td>
       <td class="num">${esc(formatMoeda(fat))}</td>
-      <td><span class="badge ${d.percentual === DESCONTO_ESPECIAL ? "badge--amber" : "badge--gray"}" title="Desconto atual">${d.percentual}%</span></td>
-      <td class="muted" style="font-size:12.5px">${esc(periodoTxt)}</td>
+      <td>
+        <select class="input cupom-desconto ${d.percentual === DESCONTO_ESPECIAL ? "cupom-desconto--50" : "cupom-desconto--20"}" data-id="${esc(p.id)}" style="width:80px">
+          <option value="20" ${d.percentual === DESCONTO_PADRAO ? "selected" : ""}>20%</option>
+          <option value="50" ${d.percentual === DESCONTO_ESPECIAL ? "selected" : ""}>50%</option>
+        </select>
+      </td>
+      <td class="muted cupom-periodo" style="font-size:12.5px">${esc(periodoTxt)}</td>
       <td>
         <select class="input cupom-grupo" data-id="${esc(p.id)}" style="width:140px">
           <option value="">Sem grupo</option>
@@ -250,6 +253,19 @@ export async function renderCupons(app) {
   });
 
   lista.addEventListener("change", async (e) => {
+    const descSel = e.target.closest(".cupom-desconto");
+    if (descSel) {
+      const id = descSel.dataset.id;
+      const percentual = Number(descSel.value);
+      const p = parceiros.find((x) => x.id === id);
+      if (!p) return;
+      const per = periodoParaPercentual(p, porIdGrupo, percentual);
+      const tr = descSel.closest("tr");
+      tr.querySelector(".cupom-periodo").textContent = fmtPeriodo(per);
+      descSel.classList.toggle("cupom-desconto--50", percentual === DESCONTO_ESPECIAL);
+      descSel.classList.toggle("cupom-desconto--20", percentual === DESCONTO_PADRAO);
+      return;
+    }
     const grupoSel = e.target.closest(".cupom-grupo");
     if (grupoSel) {
       const id = grupoSel.dataset.id;
@@ -259,32 +275,5 @@ export async function renderCupons(app) {
       if (p) p.grupoCupom = valor;
       if (aba !== "todos") desenharLista(); // some da aba do grupo antigo
     }
-  });
-
-  app.querySelector("#btn-distribuir").addEventListener("click", () => {
-    openModal({
-      title: "Gerar divisão automática",
-      subtitle: `Redistribui os ${parceiros.length} cupons entre os 4 grupos agora`,
-      submitLabel: "Redistribuir",
-      bodyHtml: `<p style="font-size:13.5px;color:var(--text-soft);line-height:1.6">
-        Isso substitui o grupo atual de cada cupom. Os cupons já usados ficam
-        espalhados igualmente entre os 4 grupos (mesma proporção em cada um),
-        e o resto preenche o espaço restante. Não afeta o período especial já
-        configurado em cada grupo.
-      </p>`,
-      onSubmit: async () => {
-        const porGrupo = distribuirEmGrupos(parceiros, lancamentos);
-        await Promise.all(
-          Object.entries(porGrupo).flatMap(([numero, ids]) =>
-            ids.map((id) => store.updateParceiro(id, { grupoCupom: Number(numero) }))
-          )
-        );
-        parceiros.forEach((p) => {
-          const numero = Object.entries(porGrupo).find(([, ids]) => ids.includes(p.id))?.[0];
-          if (numero) p.grupoCupom = Number(numero);
-        });
-        desenharLista();
-      },
-    });
   });
 }

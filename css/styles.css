@@ -280,6 +280,9 @@ button { font: inherit; }
 .badge--pink   { background: var(--c-pink-bg);   color: var(--c-pink-fg); }
 .badge--teal   { background: var(--c-teal-bg);   color: var(--c-teal-fg); }
 
+.cupom-desconto--20 { background: var(--c-gray-bg);  color: var(--c-gray-fg);  font-weight: 800; }
+.cupom-desconto--50 { background: var(--c-amber-bg); color: var(--c-amber-fg); font-weight: 800; }
+
 /* ================= DETALHE (parceiro) ================= */
 .detail-head {
   display: flex; align-items: flex-start; justify-content: space-between;
