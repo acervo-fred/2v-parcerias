@@ -1,11 +1,17 @@
 /* Dashboard — desempenho dos cupons, com período ajustável, filtros globais
-   (parceiro / tipo de parceiro), comparação automática com o período
+   (cupom / tipo de parceiro), comparação automática com o período
    anterior, uma tabela de ranking ordenável/pesquisável (com rolagem) com
    drill-down, e uma ferramenta de comparação (mesmo cupom em períodos
-   diferentes, ou dois cupons/parceiros quaisquer no mesmo período — os
-   dois campos de período do comparador ficam sincronizados). Tudo
-   calculado em cima de listLancamentos() + listParceirosFechados(), sem
-   nada gravado — puramente derivado.
+   diferentes, ou dois cupons quaisquer no mesmo período — os dois campos
+   de período do comparador ficam sincronizados). Tudo calculado em cima
+   de listLancamentos() + listParceirosFechados(), sem nada gravado —
+   puramente derivado.
+
+   Consolidação por código de cupom: quando duas empresas parceiras
+   compartilham o mesmo código de cupom, todo o desempenho (rankings,
+   gráficos, tabela, comparador) é somado e tratado como um cupom só —
+   ver js/util/cupom.js. Os filtros e o comparador operam sobre o código
+   do cupom, não mais sobre o parceiro individual.
 
    Gráficos em SVG/HTML simples (sem biblioteca), seguindo a paleta
    validada em --chart-series-a/b (ver styles.css): verde vívido como
@@ -17,6 +23,7 @@
 import { store } from "../data/store.js";
 import { esc, formatMoeda } from "../ui/dom.js";
 import { lancamentoNoPeriodo, dedupLancamentos } from "../util/periodo.js";
+import { agruparParceirosPorCupom, chaveCupom } from "../util/cupom.js";
 
 const MES_NOMES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
 const TOP_N_CUPONS = 8;
@@ -34,7 +41,12 @@ export async function renderDashboard(app) {
   // mesmo parceiro+data lançado mais de uma vez → conta só o maior, não os dois
   const lancamentos = dedupLancamentos(lancamentosBrutos);
   const porId = Object.fromEntries(parceiros.map((p) => [p.id, p]));
-  const parceirosOrdenados = [...parceiros].sort((a, b) => (a.cupom || "").localeCompare(b.cupom || "", "pt-BR"));
+  // consolidação por código de cupom (ver js/util/cupom.js): mais de uma
+  // empresa pode compartilhar o mesmo cupom — aqui elas contam como um só
+  const linhasCupom = agruparParceirosPorCupom(parceiros);
+  const chavePorParceiroId = Object.fromEntries(parceiros.map((p) => [p.id, chaveCupom(p)]));
+  const porChave = Object.fromEntries(linhasCupom.map((lc) => [lc.chave, lc]));
+  const cuponsOrdenados = [...linhasCupom].sort((a, b) => (a.cupom || "").localeCompare(b.cupom || "", "pt-BR"));
   const mesesComDados = [...new Set(lancamentos.map((l) => (l.dataInicio || "").slice(0, 7)).filter(Boolean))].sort();
 
   const [deInicial, ateInicial] = presetRange("mes");
@@ -59,10 +71,13 @@ export async function renderDashboard(app) {
         </select>` : ""}
     </div>
     <div class="toolbar" style="margin-bottom:14px; gap:10px; align-items:flex-end; flex-wrap:wrap">
-      <div class="field" style="margin-bottom:0"><label>Parceiro</label>
-        <select class="input select-compact" id="f-parceiro">
-          <option value="">Todos os parceiros</option>
-          ${parceirosOrdenados.map((p) => `<option value="${esc(p.id)}" title="${esc(p.cupom)} — ${esc(p.nome)}">${esc(p.cupom)} — ${esc(p.nome)}</option>`).join("")}
+      <div class="field" style="margin-bottom:0"><label>Cupom</label>
+        <select class="input select-compact" id="f-cupom">
+          <option value="">Todos os cupons</option>
+          ${cuponsOrdenados.map((lc) => {
+            const nomes = lc.parceiros.map((p) => p.nome).join(", ");
+            return `<option value="${esc(lc.chave)}" title="${esc(lc.cupom)} — ${esc(nomes)}">${esc(lc.cupom)} — ${esc(nomes)}</option>`;
+          }).join("")}
         </select>
       </div>
       <div class="field" style="margin-bottom:0"><label>Tipo de parceiro</label>
@@ -126,7 +141,7 @@ export async function renderDashboard(app) {
             <thead>
               <tr>
                 <th data-sort="cupom">Cupom</th>
-                <th data-sort="parceiro">Parceiro</th>
+                <th data-sort="parceiro">Empresas</th>
                 <th data-sort="uso" class="num">Usos</th>
                 <th data-sort="fat" class="num">Receita</th>
                 <th data-sort="pct" class="num">% do total</th>
@@ -146,8 +161,8 @@ export async function renderDashboard(app) {
         <input type="checkbox" id="cmp-mesmo-periodo" checked> Mesmo período
       </label>
       <div class="compare-grid">
-        ${compareColHtml("a", parceirosOrdenados, deInicial, ateInicial)}
-        ${compareColHtml("b", parceirosOrdenados, deInicial, ateInicial)}
+        ${compareColHtml("a", cuponsOrdenados, deInicial, ateInicial)}
+        ${compareColHtml("b", cuponsOrdenados, deInicial, ateInicial)}
       </div>
       <button class="btn btn-primary" id="btn-comparar" style="margin-top:14px">Comparar</button>
       <div class="chart-card" id="compare-resultado" style="margin-top:14px; display:none"></div>
@@ -156,25 +171,25 @@ export async function renderDashboard(app) {
     <div class="viz-tooltip" id="viz-tip" role="tooltip"></div>
   `;
 
-  /* ---- filtros: período + dimensões (parceiro / tipo) ---- */
+  /* ---- filtros: período + dimensões (cupom / tipo) ---- */
   function lerFiltros() {
     return {
       de: app.querySelector("#f-de").value,
       ate: app.querySelector("#f-ate").value,
-      parceiroId: app.querySelector("#f-parceiro").value,
+      cupomChave: app.querySelector("#f-cupom").value,
       tipo: app.querySelector("#f-tipo").value,
     };
   }
 
   function atualizarPeriodo() {
-    const { de, ate, parceiroId, tipo } = lerFiltros();
-    const dims = { parceiroId, tipo };
+    const { de, ate, cupomChave, tipo } = lerFiltros();
+    const dims = { cupomChave, tipo };
     const comparavel = Boolean(de && ate);
     const [deAnt, ateAnt] = comparavel ? periodoAnterior(de, ate) : ["", ""];
 
-    const doPeriodo = filtrarTudo(lancamentos, porId, { de, ate, ...dims });
-    const doPeriodoAnterior = comparavel ? filtrarTudo(lancamentos, porId, { de: deAnt, ate: ateAnt, ...dims }) : [];
-    const lancamentosDim = filtrarDimensoes(lancamentos, porId, dims);
+    const doPeriodo = filtrarTudo(lancamentos, porId, chavePorParceiroId, { de, ate, ...dims });
+    const doPeriodoAnterior = comparavel ? filtrarTudo(lancamentos, porId, chavePorParceiroId, { de: deAnt, ate: ateAnt, ...dims }) : [];
+    const lancamentosDim = filtrarDimensoes(lancamentos, porId, chavePorParceiroId, dims);
 
     app.querySelector("#comparacao-nota").textContent = comparavel
       ? `Comparado com o período imediatamente anterior de mesma duração (${formatDataBRlocal(deAnt)} – ${formatDataBRlocal(ateAnt)}).`
@@ -182,13 +197,13 @@ export async function renderDashboard(app) {
 
     desenharResumo(app, doPeriodo, doPeriodoAnterior, comparavel);
     desenharDonutCupom(app, doPeriodo);
-    desenharRanking(app, doPeriodo, porId);
-    desenharRankingUsos(app, doPeriodo, porId);
-    desenharParticipacao(app, doPeriodo, porId);
+    desenharRanking(app, doPeriodo, chavePorParceiroId, porChave);
+    desenharRankingUsos(app, doPeriodo, chavePorParceiroId, porChave);
+    desenharParticipacao(app, doPeriodo, chavePorParceiroId, porChave);
     desenharChartUsoMensal(app, lancamentosDim);
     desenharChartMes(app, lancamentosDim);
 
-    linhasRanking = calcularLinhasRanking(doPeriodo, doPeriodoAnterior, porId, comparavel);
+    linhasRanking = calcularLinhasRanking(doPeriodo, doPeriodoAnterior, chavePorParceiroId, porChave, comparavel);
     desenharTabela();
   }
 
@@ -196,7 +211,7 @@ export async function renderDashboard(app) {
     const termo = tabelaState.busca.trim().toLowerCase();
     const filtradas = termo
       ? linhasRanking.filter((l) =>
-          l.parceiro.nome.toLowerCase().includes(termo) || (l.parceiro.cupom || "").toLowerCase().includes(termo))
+          l.nomes.toLowerCase().includes(termo) || (l.linha.cupom || "").toLowerCase().includes(termo))
       : linhasRanking;
     const ordenadas = ordenarLinhas(filtradas, tabelaState.sortKey, tabelaState.sortDir);
     const body = app.querySelector("#tabela-ranking-body");
@@ -237,7 +252,7 @@ export async function renderDashboard(app) {
       atualizarPeriodo();
     });
   });
-  ["#f-parceiro", "#f-tipo"].forEach((sel) => {
+  ["#f-cupom", "#f-tipo"].forEach((sel) => {
     app.querySelector(sel).addEventListener("change", atualizarPeriodo);
   });
   atualizarPeriodo();
@@ -289,7 +304,7 @@ export async function renderDashboard(app) {
   });
 
   app.querySelector("#btn-comparar").addEventListener("click", () => {
-    compararEDesenhar(app, lancamentos, porId);
+    compararEDesenhar(app, lancamentos, chavePorParceiroId, porChave);
   });
 }
 
@@ -344,24 +359,29 @@ function ultimoDiaMes(mesStr) {
 function filtrarPeriodo(lancamentos, de, ate) {
   return lancamentos.filter((l) => lancamentoNoPeriodo(l, de, ate));
 }
-function filtrarDimensoes(lancamentos, porId, { parceiroId, tipo }) {
-  if (!parceiroId && !tipo) return lancamentos;
+function filtrarDimensoes(lancamentos, porId, chavePorParceiroId, { cupomChave, tipo }) {
+  if (!cupomChave && !tipo) return lancamentos;
   return lancamentos.filter((l) => {
     const p = porId[l.parceiroId];
     if (!p) return false;
-    if (parceiroId && l.parceiroId !== parceiroId) return false;
+    if (cupomChave && chavePorParceiroId[l.parceiroId] !== cupomChave) return false;
     if (tipo && p.tipo !== tipo) return false;
     return true;
   });
 }
-function filtrarTudo(lancamentos, porId, { de, ate, parceiroId, tipo }) {
-  return filtrarDimensoes(filtrarPeriodo(lancamentos, de, ate), porId, { parceiroId, tipo });
+function filtrarTudo(lancamentos, porId, chavePorParceiroId, { de, ate, cupomChave, tipo }) {
+  return filtrarDimensoes(filtrarPeriodo(lancamentos, de, ate), porId, chavePorParceiroId, { cupomChave, tipo });
 }
-function agregarPorParceiro(lista) {
+// agrega lançamentos pelo código de cupom (consolidado) em vez de por
+// parceiro individual — cupons compartilhados por mais de uma empresa
+// somam uso/faturamento juntos
+function agregarPorCupom(lista, chavePorParceiroId) {
   const mapa = new Map();
   for (const l of lista) {
-    if (!mapa.has(l.parceiroId)) mapa.set(l.parceiroId, { uso: 0, fatCupom: 0, fatSemCupom: 0 });
-    const a = mapa.get(l.parceiroId);
+    const chave = chavePorParceiroId[l.parceiroId];
+    if (!chave) continue;
+    if (!mapa.has(chave)) mapa.set(chave, { uso: 0, fatCupom: 0, fatSemCupom: 0 });
+    const a = mapa.get(chave);
     a.uso += l.quantidadeUso;
     a.fatCupom += l.faturamentoCupom;
     a.fatSemCupom += l.faturamentoSemCupom;
@@ -462,11 +482,11 @@ function donutSVG(pctCupom, pctDelivery) {
 }
 
 /* ---------- render: ranking por cupom (barras horizontais) ---------- */
-function desenharRanking(app, doPeriodo, porId) {
-  const agregados = agregarPorParceiro(doPeriodo);
+function desenharRanking(app, doPeriodo, chavePorParceiroId, porChave) {
+  const agregados = agregarPorCupom(doPeriodo, chavePorParceiroId);
   const linhas = [...agregados.entries()]
-    .map(([pid, a]) => ({ parceiro: porId[pid], uso: a.uso, fat: a.fatCupom }))
-    .filter((l) => l.parceiro && l.fat > 0)
+    .map(([chave, a]) => ({ linha: porChave[chave], uso: a.uso, fat: a.fatCupom }))
+    .filter((l) => l.linha && l.fat > 0)
     .sort((a, b) => b.fat - a.fat)
     .slice(0, TOP_N_CUPONS);
 
@@ -477,8 +497,8 @@ function desenharRanking(app, doPeriodo, porId) {
   }
   const max = Math.max(...linhas.map((l) => l.fat));
   container.innerHTML = linhas.map((l) => `
-    <div class="viz-bar-row" data-id="${esc(l.parceiro.id)}" tabindex="0" role="img" aria-label="${esc(l.parceiro.cupom)}: ${esc(formatMoeda(l.fat))}, ${l.uso} usos">
-      <div class="viz-bar-label" title="${esc(l.parceiro.cupom)} — ${esc(l.parceiro.nome)}">${esc(l.parceiro.cupom)}</div>
+    <div class="viz-bar-row" data-id="${esc(l.linha.parceiros[0].id)}" tabindex="0" role="img" aria-label="${esc(l.linha.cupom)}: ${esc(formatMoeda(l.fat))}, ${l.uso} usos">
+      <div class="viz-bar-label" title="${esc(l.linha.cupom)} — ${esc(l.linha.parceiros.map((p) => p.nome).join(", "))}">${esc(l.linha.cupom)}</div>
       <div class="viz-bar-track"><div class="viz-bar-fill" style="width:${Math.max(2, Math.round((l.fat / max) * 100))}%"></div></div>
       <div class="viz-bar-val">${esc(formatMoeda(l.fat))}</div>
     </div>
@@ -487,11 +507,11 @@ function desenharRanking(app, doPeriodo, porId) {
 }
 
 /* ---------- render: ranking por usos (barras horizontais) ---------- */
-function desenharRankingUsos(app, doPeriodo, porId) {
-  const agregados = agregarPorParceiro(doPeriodo);
+function desenharRankingUsos(app, doPeriodo, chavePorParceiroId, porChave) {
+  const agregados = agregarPorCupom(doPeriodo, chavePorParceiroId);
   const linhas = [...agregados.entries()]
-    .map(([pid, a]) => ({ parceiro: porId[pid], uso: a.uso, fat: a.fatCupom }))
-    .filter((l) => l.parceiro && l.uso > 0)
+    .map(([chave, a]) => ({ linha: porChave[chave], uso: a.uso, fat: a.fatCupom }))
+    .filter((l) => l.linha && l.uso > 0)
     .sort((a, b) => b.uso - a.uso)
     .slice(0, TOP_N_CUPONS);
 
@@ -502,8 +522,8 @@ function desenharRankingUsos(app, doPeriodo, porId) {
   }
   const max = Math.max(...linhas.map((l) => l.uso));
   container.innerHTML = linhas.map((l) => `
-    <div class="viz-bar-row" data-id="${esc(l.parceiro.id)}" tabindex="0" role="img" aria-label="${esc(l.parceiro.cupom)}: ${l.uso} usos">
-      <div class="viz-bar-label" title="${esc(l.parceiro.cupom)} — ${esc(l.parceiro.nome)}">${esc(l.parceiro.cupom)}</div>
+    <div class="viz-bar-row" data-id="${esc(l.linha.parceiros[0].id)}" tabindex="0" role="img" aria-label="${esc(l.linha.cupom)}: ${l.uso} usos">
+      <div class="viz-bar-label" title="${esc(l.linha.cupom)} — ${esc(l.linha.parceiros.map((p) => p.nome).join(", "))}">${esc(l.linha.cupom)}</div>
       <div class="viz-bar-track"><div class="viz-bar-fill" style="width:${Math.max(2, Math.round((l.uso / max) * 100))}%"></div></div>
       <div class="viz-bar-val">${l.uso}</div>
     </div>
@@ -521,11 +541,11 @@ function wireBarDrillDown(container) {
 }
 
 /* ---------- render: participação por cupom (barra empilhada + legenda) ---------- */
-function desenharParticipacao(app, doPeriodo, porId) {
-  const agregados = agregarPorParceiro(doPeriodo);
+function desenharParticipacao(app, doPeriodo, chavePorParceiroId, porChave) {
+  const agregados = agregarPorCupom(doPeriodo, chavePorParceiroId);
   const linhas = [...agregados.entries()]
-    .map(([pid, a]) => ({ parceiro: porId[pid], fat: a.fatCupom }))
-    .filter((l) => l.parceiro && l.fat > 0)
+    .map(([chave, a]) => ({ linha: porChave[chave], fat: a.fatCupom }))
+    .filter((l) => l.linha && l.fat > 0)
     .sort((a, b) => b.fat - a.fat);
 
   const container = app.querySelector("#participacao");
@@ -538,7 +558,7 @@ function desenharParticipacao(app, doPeriodo, porId) {
   const outros = linhas.slice(CORES_CATEGORICAS.length).reduce((s, l) => s + l.fat, 0);
 
   const segmentos = top.map((l, i) => ({
-    label: l.parceiro.cupom, valor: l.fat, cor: CORES_CATEGORICAS[i],
+    label: l.linha.cupom, valor: l.fat, cor: CORES_CATEGORICAS[i],
   }));
   if (outros > 0) segmentos.push({ label: "Outros", valor: outros, cor: COR_OUTROS });
 
@@ -558,31 +578,32 @@ function desenharParticipacao(app, doPeriodo, porId) {
 }
 
 /* ---------- tabela de ranking: cálculo de linhas (com crescimento) ---------- */
-function calcularLinhasRanking(doPeriodo, doPeriodoAnterior, porId, comparavel) {
-  const atual = agregarPorParceiro(doPeriodo);
-  const anterior = agregarPorParceiro(doPeriodoAnterior);
+function calcularLinhasRanking(doPeriodo, doPeriodoAnterior, chavePorParceiroId, porChave, comparavel) {
+  const atual = agregarPorCupom(doPeriodo, chavePorParceiroId);
+  const anterior = agregarPorCupom(doPeriodoAnterior, chavePorParceiroId);
   const totalGeral = [...atual.values()].reduce((s, a) => s + a.fatCupom, 0);
 
   return [...atual.entries()]
-    .map(([pid, a]) => {
-      const parceiro = porId[pid];
-      const ant = anterior.get(pid);
+    .map(([chave, a]) => {
+      const linha = porChave[chave];
+      const ant = anterior.get(chave);
       const growth = comparavel ? pctDelta(a.fatCupom, ant ? ant.fatCupom : 0) : undefined;
       return {
-        parceiro, uso: a.uso, fat: a.fatCupom,
+        linha, nomes: linha ? linha.parceiros.map((p) => p.nome).join(", ") : "",
+        uso: a.uso, fat: a.fatCupom,
         pct: totalGeral > 0 ? (a.fatCupom / totalGeral) * 100 : 0,
         ticket: a.uso > 0 ? a.fatCupom / a.uso : 0,
         growth,
       };
     })
-    .filter((l) => l.parceiro && l.fat > 0);
+    .filter((l) => l.linha && l.fat > 0);
 }
 function ordenarLinhas(linhas, key, dir) {
   const mul = dir === "asc" ? 1 : -1;
   const val = (l) => {
     switch (key) {
-      case "cupom": return (l.parceiro.cupom || "").toLowerCase();
-      case "parceiro": return l.parceiro.nome.toLowerCase();
+      case "cupom": return (l.linha.cupom || "").toLowerCase();
+      case "parceiro": return l.nomes.toLowerCase();
       case "uso": return l.uso;
       case "fat": return l.fat;
       case "pct": return l.pct;
@@ -598,9 +619,9 @@ function ordenarLinhas(linhas, key, dir) {
   });
 }
 function tabelaRowHtml(l) {
-  return `<tr class="rank-row" data-id="${esc(l.parceiro.id)}" tabindex="0">
-    <td>${esc(l.parceiro.cupom)}</td>
-    <td>${esc(l.parceiro.nome)}</td>
+  return `<tr class="rank-row" data-id="${esc(l.linha.parceiros[0].id)}" tabindex="0">
+    <td>${esc(l.linha.cupom)}</td>
+    <td>${esc(l.nomes)}</td>
     <td class="num">${l.uso}</td>
     <td class="num">${esc(formatMoeda(l.fat))}</td>
     <td class="num">${l.pct.toFixed(1)}%</td>
@@ -763,10 +784,10 @@ function wireLineChartHover(container, pontos, formatValue) {
 }
 
 /* ---------- comparação (barras pareadas, 2 séries + linha sobreposta) ---------- */
-function compareColHtml(id, parceiros, de, ate) {
-  const opts = parceiros.map((p) => `<option value="${esc(p.id)}">${esc(p.cupom)} — ${esc(p.nome)}</option>`).join("");
+function compareColHtml(id, cupons, de, ate) {
+  const opts = cupons.map((lc) => `<option value="${esc(lc.chave)}">${esc(lc.cupom)} — ${esc(lc.parceiros.map((p) => p.nome).join(", "))}</option>`).join("");
   return `<div class="compare-col">
-    <div class="field"><label>Cupom / parceiro</label><select class="input" id="cmp-${id}-parceiro">${opts}</select></div>
+    <div class="field"><label>Cupom</label><select class="input" id="cmp-${id}-cupom">${opts}</select></div>
     <div class="field-2col">
       <div class="field"><label>De</label><input class="input" type="date" id="cmp-${id}-de" value="${de}"></div>
       <div class="field"><label>Até</label><input class="input" type="date" id="cmp-${id}-ate" value="${ate}"></div>
@@ -774,8 +795,8 @@ function compareColHtml(id, parceiros, de, ate) {
   </div>`;
 }
 
-function calcularAgregado(lancamentos, parceiroId, de, ate) {
-  const filtrado = lancamentos.filter((l) => l.parceiroId === parceiroId && lancamentoNoPeriodo(l, de, ate));
+function calcularAgregado(lancamentos, chavePorParceiroId, cupomChave, de, ate) {
+  const filtrado = lancamentos.filter((l) => chavePorParceiroId[l.parceiroId] === cupomChave && lancamentoNoPeriodo(l, de, ate));
   const uso = filtrado.reduce((s, l) => s + l.quantidadeUso, 0);
   const fat = filtrado.reduce((s, l) => s + l.faturamentoCupom, 0);
   return { uso, fat, ticket: uso > 0 ? fat / uso : 0 };
@@ -785,8 +806,8 @@ function totalCupomNoPeriodo(lancamentos, de, ate) {
     .filter((l) => lancamentoNoPeriodo(l, de, ate))
     .reduce((s, l) => s + l.faturamentoCupom, 0);
 }
-function serieMensal(lancamentos, parceiroId, de, ate) {
-  const filtrado = lancamentos.filter((l) => l.parceiroId === parceiroId && lancamentoNoPeriodo(l, de, ate));
+function serieMensal(lancamentos, chavePorParceiroId, cupomChave, de, ate) {
+  const filtrado = lancamentos.filter((l) => chavePorParceiroId[l.parceiroId] === cupomChave && lancamentoNoPeriodo(l, de, ate));
   const mapa = new Map();
   for (const l of filtrado) {
     const mes = (l.dataInicio || "").slice(0, 7);
@@ -796,16 +817,16 @@ function serieMensal(lancamentos, parceiroId, de, ate) {
   return mapa;
 }
 
-function compararEDesenhar(app, lancamentos, porId) {
-  const pidA = app.querySelector("#cmp-a-parceiro").value;
-  const pidB = app.querySelector("#cmp-b-parceiro").value;
+function compararEDesenhar(app, lancamentos, chavePorParceiroId, porChave) {
+  const chaveA = app.querySelector("#cmp-a-cupom").value;
+  const chaveB = app.querySelector("#cmp-b-cupom").value;
   const deA = app.querySelector("#cmp-a-de").value, ateA = app.querySelector("#cmp-a-ate").value;
   const deB = app.querySelector("#cmp-b-de").value, ateB = app.querySelector("#cmp-b-ate").value;
-  const a = calcularAgregado(lancamentos, pidA, deA, ateA);
-  const b = calcularAgregado(lancamentos, pidB, deB, ateB);
-  const pA = porId[pidA], pB = porId[pidB];
-  const nomeA = pA ? pA.cupom : "—";
-  const nomeB = pB ? pB.cupom : "—";
+  const a = calcularAgregado(lancamentos, chavePorParceiroId, chaveA, deA, ateA);
+  const b = calcularAgregado(lancamentos, chavePorParceiroId, chaveB, deB, ateB);
+  const lcA = porChave[chaveA], lcB = porChave[chaveB];
+  const nomeA = lcA ? lcA.cupom : "—";
+  const nomeB = lcB ? lcB.cupom : "—";
 
   const totalPeriodoA = totalCupomNoPeriodo(lancamentos, deA, ateA);
   const totalPeriodoB = totalCupomNoPeriodo(lancamentos, deB, ateB);
@@ -817,8 +838,8 @@ function compararEDesenhar(app, lancamentos, porId) {
   const maxPct = Math.max(pctA, pctB, 1);
 
   // evolução mensal sobreposta (uma série por lado, cada uma no seu próprio range)
-  const mapaA = serieMensal(lancamentos, pidA, deA, ateA);
-  const mapaB = serieMensal(lancamentos, pidB, deB, ateB);
+  const mapaA = serieMensal(lancamentos, chavePorParceiroId, chaveA, deA, ateA);
+  const mapaB = serieMensal(lancamentos, chavePorParceiroId, chaveB, deB, ateB);
   const meses = [...new Set([...mapaA.keys(), ...mapaB.keys()])].sort();
   const labels = meses.map(mesLabel);
   const valoresA = meses.map((m) => mapaA.get(m) || 0);

@@ -2,7 +2,7 @@
    Após gravar, dispara "data-changed" para a tela atual se re-renderizar. */
 
 import { store } from "../data/store.js";
-import { esc } from "../ui/dom.js";
+import { esc, parseNumeroBR, formatNumeroBR } from "../ui/dom.js";
 import { openModal, fieldText, fieldTextarea, fieldSelect, readValue } from "../ui/modal.js";
 import { PERIODO_TIPOS, PERIODO_MAP, rotuloTipoAtual, calcularDataFim, calcularRotulo } from "../util/periodo.js";
 
@@ -267,9 +267,9 @@ export async function abrirNovoLancamento(parceiroIdSugerido = "", existente = n
       ${fieldText("periodoLabel", "Rótulo do período", { value: l.periodoLabel || "", hint: "Preenchido automaticamente a partir do tipo e das datas — pode editar se quiser." })}
       <div class="field-2col">
         ${fieldText("quantidadeUso", "Qtd. de uso do cupom", { type: "number", required: true, value: l.quantidadeUso ?? "" })}
-        ${fieldText("faturamentoCupom", "Faturamento via cupom (R$)", { type: "number", required: true, value: l.faturamentoCupom ?? "" })}
+        ${fieldText("faturamentoCupom", "Faturamento via cupom (R$)", { required: true, value: formatNumeroBR(l.faturamentoCupom), placeholder: "Ex.: 1.234,56", inputmode: "decimal" })}
       </div>
-      ${fieldText("faturamentoTotal", "Faturamento total da loja no período (R$)", { type: "number", required: true, value: l.faturamentoTotal ?? "", hint: "Tudo que a loja faturou no período, incluindo o que veio do cupom. O quanto foi sem cupom é calculado sozinho." })}
+      ${fieldText("faturamentoTotal", "Faturamento total da loja no período (R$)", { required: true, value: formatNumeroBR(l.faturamentoTotal), placeholder: "Ex.: 84.281,93", inputmode: "decimal", hint: "Tudo que a loja faturou no período, incluindo o que veio do cupom. O quanto foi sem cupom é calculado sozinho." })}
       ${fieldTextarea("observacoes", "Observações", { value: l.observacoes || "" })}
     `,
     onMount: (form) => wirePeriodo(form),
@@ -287,8 +287,8 @@ export async function abrirNovoLancamento(parceiroIdSugerido = "", existente = n
         periodoTipo: PERIODO_MAP[readValue(form, "periodoTipo")] || "dia",
         periodoLabel: readValue(form, "periodoLabel"),
         quantidadeUso: readValue(form, "quantidadeUso"),
-        faturamentoCupom: readValue(form, "faturamentoCupom"),
-        faturamentoTotal: readValue(form, "faturamentoTotal"),
+        faturamentoCupom: parseNumeroBR(readValue(form, "faturamentoCupom")),
+        faturamentoTotal: parseNumeroBR(readValue(form, "faturamentoTotal")),
         observacoes: readValue(form, "observacoes"),
       };
       if (ed) await store.updateLancamento(l.id, campos);
@@ -309,7 +309,7 @@ function loteRowHtml(parceiros, valores = {}) {
   return `<div class="lote-row" data-row>
     <select class="input lote-parceiro">${opts}</select>
     <input class="input lote-uso" type="number" min="0" placeholder="Uso" value="${valores.quantidadeUso ?? ""}">
-    <input class="input lote-fat" type="number" min="0" step="0.01" placeholder="Faturamento cupom (R$)" value="${valores.faturamentoCupom ?? ""}">
+    <input class="input lote-fat" inputmode="decimal" placeholder="Faturamento cupom (R$) — ex.: 1.234,56" value="${formatNumeroBR(valores.faturamentoCupom)}">
     <button type="button" class="icon-btn danger lote-remove" title="Remover linha">🗑</button>
   </div>`;
 }
@@ -334,14 +334,14 @@ export async function abrirFaturamentoLoja(existente = null) {
         ${fieldText("dataFim", "Fim do período", { type: "date", required: true, value: l.dataFim || dataInicioIni })}
       </div>
       ${fieldText("periodoLabel", "Rótulo do período", { value: l.periodoLabel || "", hint: "Preenchido automaticamente a partir do tipo e das datas — pode editar se quiser." })}
-      ${fieldText("faturamentoTotal", "Faturamento total da loja (R$)", { type: "number", required: true, value: l.faturamentoTotal ?? "", placeholder: "Ex.: 84281.93" })}
-      ${fieldText("faturamentoDelivery", "Faturamento via delivery (R$)", { type: "number", value: l.faturamentoDelivery ?? "", placeholder: "Ex.: 6684.28", hint: "Opcional — deixe em branco se o período não tiver esse dado." })}
+      ${fieldText("faturamentoTotal", "Faturamento total da loja (R$)", { required: true, value: formatNumeroBR(l.faturamentoTotal), placeholder: "Ex.: 84.281,93", inputmode: "decimal" })}
+      ${fieldText("faturamentoDelivery", "Faturamento via delivery (R$)", { value: formatNumeroBR(l.faturamentoDelivery), placeholder: "Ex.: 6.684,28", inputmode: "decimal", hint: "Opcional — deixe em branco se o período não tiver esse dado." })}
     `,
     onMount: (form) => wirePeriodo(form),
     onSubmit: async (form) => {
       const dataInicio = readValue(form, "dataInicio");
       const dataFim = readValue(form, "dataFim");
-      const faturamentoTotal = readValue(form, "faturamentoTotal");
+      const faturamentoTotal = parseNumeroBR(readValue(form, "faturamentoTotal"));
       if (!dataInicio) throw new Error("Informe o início do período.");
       if (!dataFim) throw new Error("Informe o fim do período.");
       if (!faturamentoTotal) throw new Error("Informe o faturamento total da loja.");
@@ -354,7 +354,7 @@ export async function abrirFaturamentoLoja(existente = null) {
         quantidadeUso: 0,
         faturamentoCupom: 0,
         faturamentoTotal,
-        faturamentoDelivery: readValue(form, "faturamentoDelivery"),
+        faturamentoDelivery: parseNumeroBR(readValue(form, "faturamentoDelivery")),
       };
       if (ed) await store.updateLancamento(l.id, campos);
       else await store.addLancamento(campos);
@@ -420,7 +420,7 @@ export async function abrirLancamentoLote() {
       form.querySelectorAll(".lote-row").forEach((row) => {
         const parceiroId = row.querySelector(".lote-parceiro").value;
         const quantidadeUso = row.querySelector(".lote-uso").value;
-        const faturamentoCupom = row.querySelector(".lote-fat").value;
+        const faturamentoCupom = parseNumeroBR(row.querySelector(".lote-fat").value);
         if (!parceiroId || (!quantidadeUso && !faturamentoCupom)) return;
         linhas.push({ parceiroId, dataInicio, dataFim, periodoTipo, periodoLabel, quantidadeUso, faturamentoCupom });
       });
