@@ -3,40 +3,41 @@ rules_version = '2';
 // ============================================================
 // Regras do Firestore — projeto dedicado ao 2V Parcerias
 // ============================================================
-// ⚠️ TEMPORÁRIAS (fase de desenvolvimento, SEM login). Liberam
-// leitura/escrita em todo o banco até a data de expiração abaixo.
-// Como o app fica no GitHub Pages (público) e a apiKey é visível,
-// estas regras NÃO protegem os dados — qualquer pessoa com a URL
-// poderia ler/gravar.
-//
-// ANTES de colocar dados sensíveis de verdade (contatos, valores),
-// troque pelo bloco "COM LOGIN" mais abaixo (Firebase Auth).
+// Leitura livre pra todo mundo. Escrita só pra quem estiver logado
+// com uma das contas Google autorizadas abaixo.
 // ============================================================
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // libera enquanto estiver dentro do prazo de desenvolvimento
-    function devAberto() {
-      return request.time < timestamp.date(2026, 12, 31);
+    function emailAutorizado() {
+      return request.auth != null && request.auth.token.email in [
+        "fredericoessinger@gmail.com",
+        "manuela.goulart@grupotrigo.com.br",
+        "gmanuelajacome@gmail.com",
+        "acervo@girostraffic.page"
+      ];
     }
 
-    match /parceiros/{document=**}    { allow read, write: if devAberto(); }
-    match /lancamentos/{document=**}  { allow read, write: if devAberto(); }
-    match /config/{document=**}       { allow read, write: if devAberto(); }
-    match /lojas/{document=**}        { allow read, write: if devAberto(); }
-    match /grupos/{document=**}       { allow read, write: if devAberto(); }
+    // ---- coleções atuais ----
+    match /parceiros/{document=**}    { allow read: if true; allow write: if emailAutorizado(); }
+    match /lancamentos/{document=**}  { allow read: if true; allow write: if emailAutorizado(); }
+    match /config/{document=**}       { allow read: if true; allow write: if emailAutorizado(); }
+    match /lojas/{document=**}        { allow read: if true; allow write: if emailAutorizado(); }
+    match /grupos/{document=**}       { allow read: if true; allow write: if emailAutorizado(); }
+
+    // ---- CRM (Fase 1 — schema novo, ver migracao.html) ----
+    match /partners/{partnerId} {
+      allow read: if true;
+      allow write: if emailAutorizado();
+      match /interactions/{document=**} { allow read: if true; allow write: if emailAutorizado(); }
+    }
+    match /campaigns/{document=**}        { allow read: if true; allow write: if emailAutorizado(); }
+    match /campaignPartners/{document=**} { allow read: if true; allow write: if emailAutorizado(); }
+    match /coupons/{document=**}          { allow read: if true; allow write: if emailAutorizado(); }
+    match /couponPartners/{document=**}   { allow read: if true; allow write: if emailAutorizado(); }
+    match /tasks/{document=**}            { allow read: if true; allow write: if emailAutorizado(); }
 
     // Nada mais é exposto.
   }
 }
-
-// ============================================================
-// VERSÃO COM LOGIN (usar quando ativarmos o Firebase Auth):
-//
-// match /databases/{database}/documents {
-//   match /{document=**} {
-//     allow read, write: if request.auth != null;
-//   }
-// }
-// ============================================================

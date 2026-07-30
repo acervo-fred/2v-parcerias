@@ -7,6 +7,11 @@
    somadas. Só a aba Parceiros continua listando cada empresa à parte.
    ============================================================ */
 
+import { formatDataBR } from "../ui/dom.js";
+
+const DESCONTO_PADRAO = 20;
+const DESCONTO_ESPECIAL = 50;
+
 export function normalizarCupom(cupom) {
   return (cupom || "").trim().toUpperCase();
 }
@@ -29,4 +34,31 @@ export function agruparParceirosPorCupom(parceiros) {
     mapa.get(chave).parceiros.push(p);
   }
   return [...mapa.values()];
+}
+
+/* 20% por padrão (dentro da vigência do próprio cupom, dataInicio/
+   dataVencimento) — 50% só enquanto hoje estiver dentro do período
+   especial configurado no grupo do cupom. Devolve também as datas de
+   início/fim de qual dos dois estiver valendo. */
+export function descontoAtual(parceiro, grupos) {
+  const hoje = new Date().toISOString().slice(0, 10);
+  const porIdGrupo = Object.fromEntries((grupos || []).map((g) => [String(g.numero), g]));
+  const g = porIdGrupo[String(parceiro.grupoCupom || "")];
+  if (g && g.inicio && g.fim && hoje >= g.inicio && hoje <= g.fim) {
+    return { percentual: DESCONTO_ESPECIAL, inicio: g.inicio, fim: g.fim };
+  }
+  return { percentual: DESCONTO_PADRAO, inicio: parceiro.dataInicio || "", fim: parceiro.dataVencimento || "" };
+}
+
+/* Texto "20% até DD/MM/AAAA / 50% até DD/MM/AAAA" — mesmo formato do
+   campo livre "periodoDesconto" original, só que calculado ao vivo a
+   partir da vigência do cupom (20%) e do período especial do grupo
+   (50%), em vez de digitado à mão. Data ausente vira o placeholder
+   literal "DD/MM/AAAA", sinalizando que falta preencher. */
+export function validadeCupomTexto(parceiro, grupos) {
+  const porIdGrupo = Object.fromEntries((grupos || []).map((g) => [String(g.numero), g]));
+  const g = porIdGrupo[String(parceiro.grupoCupom || "")];
+  const fimPadrao = parceiro.dataVencimento ? formatDataBR(parceiro.dataVencimento) : "DD/MM/AAAA";
+  const fimEspecial = g?.fim ? formatDataBR(g.fim) : "DD/MM/AAAA";
+  return `${DESCONTO_PADRAO}% até ${fimPadrao} / ${DESCONTO_ESPECIAL}% até ${fimEspecial}`;
 }

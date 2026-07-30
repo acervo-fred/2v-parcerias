@@ -6,7 +6,9 @@
 import { store } from "../data/store.js";
 import { esc, formatMoeda, formatDataBR } from "../ui/dom.js";
 import { abrirLancamentoLote, abrirNovoLancamento, abrirFaturamentoLoja } from "./cadastros.js";
-import { dedupLancamentos } from "../util/periodo.js";
+import { dedupLancamentos, statusDiasDoMes, MES_NOMES } from "../util/periodo.js";
+import { agruparParceirosPorCupom, chaveCupom } from "../util/cupom.js";
+import { openModal } from "../ui/modal.js";
 
 export async function renderLancamentos(app) {
   const [lancamentos, parceiros] = await Promise.all([
@@ -14,9 +16,14 @@ export async function renderLancamentos(app) {
     store.listParceiros(),
   ]);
   const porId = Object.fromEntries(parceiros.map((p) => [p.id, p]));
+  // cupom compartilhado por mais de uma empresa conta como um só no filtro
+  // (ver js/util/cupom.js) — mesmo padrão já usado no Dashboard e em Cupons
+  const chavePorParceiroId = Object.fromEntries(parceiros.map((p) => [p.id, chaveCupom(p)]));
+  const gruposCupom = agruparParceirosPorCupom(parceiros.filter((p) => p.ehParceiro))
+    .sort((a, b) => (a.cupom || "").localeCompare(b.cupom || "", "pt-BR"));
 
   let busca = "";
-  let filtroParceiro = "";
+  let filtroCupom = "";
 
   // os totais do topo não contam duplicata (mesmo parceiro+data) duas vezes,
   // mas a lista abaixo continua mostrando todos os lançamentos de verdade —
@@ -31,10 +38,13 @@ export async function renderLancamentos(app) {
         <h1 class="page-title">Base de dados</h1>
         <div class="page-sub">${lancamentos.length} lançamentos registrados</div>
       </div>
-      <div class="toolbar">
-        <button class="btn btn-ghost" data-act="loja">+ Faturamento da loja</button>
-        <button class="btn btn-ghost" data-act="avulso">+ Lançamento avulso</button>
-        <button class="btn btn-primary" data-act="lote">+ Lançamento em lote</button>
+      <div class="row-end">
+        <button class="btn btn-ghost" id="btn-mes"><span class="ni-ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span> Registros por mês</button>
+        <div class="toolbar edit-only">
+          <button class="btn btn-ghost" data-act="loja">+ Faturamento da loja</button>
+          <button class="btn btn-ghost" data-act="avulso">+ Lançamento avulso</button>
+          <button class="btn btn-primary" data-act="lote">+ Lançamento em lote</button>
+        </div>
       </div>
     </div>
 
@@ -47,9 +57,8 @@ export async function renderLancamentos(app) {
     <div class="toolbar" style="margin-bottom:16px; gap:10px">
       <input class="input" id="busca" type="search" placeholder="Buscar por parceiro, cupom ou rótulo do período…" style="flex:1;min-width:200px" />
       <select class="input" id="filtro-parceiro" style="width:auto">
-        <option value="">Todos os parceiros</option>
-        ${parceiros.filter((p) => p.ehParceiro).sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"))
-          .map((p) => `<option value="${esc(p.id)}">${esc(p.nome)} — ${esc(p.cupom)}</option>`).join("")}
+        <option value="">Todos os cupons</option>
+        ${gruposCupom.map((lc) => `<option value="${esc(lc.chave)}">${esc(lc.cupom)} — ${esc(lc.parceiros.map((p) => p.nome).join(", "))}</option>`).join("")}
       </select>
     </div>
 
@@ -68,7 +77,7 @@ export async function renderLancamentos(app) {
         || (p?.cupom || "").toLowerCase().includes(termo)
         || (l.periodoLabel || "").toLowerCase().includes(termo)
         || (!l.parceiroId && "faturamento da loja".includes(termo));
-      const okParceiro = !filtroParceiro || l.parceiroId === filtroParceiro;
+      const okParceiro = !filtroCupom || chavePorParceiroId[l.parceiroId] === filtroCupom;
       return okBusca && okParceiro;
     }).sort((a, b) => {
       const nomeA = a.parceiroId ? (porId[a.parceiroId]?.nome || "") : "Faturamento da loja";
@@ -83,13 +92,14 @@ export async function renderLancamentos(app) {
   desenhar();
 
   app.querySelector("#busca").addEventListener("input", (e) => { busca = e.target.value; desenhar(); });
-  app.querySelector("#filtro-parceiro").addEventListener("change", (e) => { filtroParceiro = e.target.value; desenhar(); });
+  app.querySelector("#filtro-parceiro").addEventListener("change", (e) => { filtroCupom = e.target.value; desenhar(); });
 
   app.querySelector(".page-head .toolbar").addEventListener("click", (e) => {
     if (e.target.closest("[data-act='lote']")) return abrirLancamentoLote();
     if (e.target.closest("[data-act='avulso']")) return abrirNovoLancamento();
     if (e.target.closest("[data-act='loja']")) return abrirFaturamentoLoja();
   });
+  app.querySelector("#btn-mes").addEventListener("click", () => abrirCalendarioMes(lancamentos));
 
   lista.addEventListener("click", async (e) => {
     const id = e.target.dataset.id;
@@ -104,6 +114,60 @@ export async function renderLancamentos(app) {
       await store.removeLancamento(id);
       window.dispatchEvent(new CustomEvent("data-changed"));
     }
+  });
+}
+
+const DIAS_SEMANA = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+
+function abrirCalendarioMes(lancamentos) {
+  const hoje = new Date();
+  let ano = hoje.getFullYear(), mes = hoje.getMonth() + 1;
+  if (lancamentos.length) {
+    const maisRecente = lancamentos.reduce((a, b) =>
+      (b.dataFim || b.dataInicio || "") > (a.dataFim || a.dataInicio || "") ? b : a
+    );
+    const [y, m] = (maisRecente.dataFim || maisRecente.dataInicio || "").split("-");
+    if (y && m) { ano = Number(y); mes = Number(m); }
+  }
+
+  openModal({
+    title: "Lançamentos por dia",
+    subtitle: "Verde: dia com lançamento. Amarelo: dias cobertos por lançamentos sobrepostos do mesmo parceiro (ignorados nas contas do Dashboard).",
+    submitLabel: "Fechar",
+    bodyHtml: `
+      <div class="cal-nav">
+        <button type="button" class="btn btn-ghost btn-sm" id="cal-prev">‹</button>
+        <strong id="cal-titulo"></strong>
+        <button type="button" class="btn btn-ghost btn-sm" id="cal-next">›</button>
+      </div>
+      <div class="calendario-mes">
+        ${DIAS_SEMANA.map((d) => `<div class="cal-dia cal-dia--cabecalho">${d}</div>`).join("")}
+      </div>
+      <div class="calendario-mes" id="cal-grid"></div>
+    `,
+    onMount: (form) => {
+      const titulo = form.querySelector("#cal-titulo");
+      const grid = form.querySelector("#cal-grid");
+      function desenhar() {
+        titulo.textContent = `${MES_NOMES[mes - 1]} / ${ano}`;
+        const dias = statusDiasDoMes(lancamentos, ano, mes);
+        const offset = new Date(ano, mes - 1, 1).getDay();
+        const celulas = [];
+        for (let i = 0; i < offset; i++) celulas.push(`<div class="cal-dia cal-dia--fora"></div>`);
+        dias.forEach((d) => celulas.push(`<div class="cal-dia cal-dia--${d.status}">${d.dia}</div>`));
+        grid.innerHTML = celulas.join("");
+      }
+      form.querySelector("#cal-prev").addEventListener("click", () => {
+        mes--; if (mes < 1) { mes = 12; ano--; }
+        desenhar();
+      });
+      form.querySelector("#cal-next").addEventListener("click", () => {
+        mes++; if (mes > 12) { mes = 1; ano++; }
+        desenhar();
+      });
+      desenhar();
+    },
+    onSubmit: async () => {},
   });
 }
 
@@ -129,7 +193,7 @@ function row(l, parceiro) {
       <div class="lr-title">${esc(nomeParceiro)}</div>
       <div class="lr-sub">${esc(sub)}</div>
     </div>
-    <span class="lr-actions">
+    <span class="lr-actions edit-only">
       <button class="icon-btn" data-action="editar" data-id="${esc(l.id)}" title="Editar">✎</button>
       <button class="icon-btn danger" data-action="excluir" data-id="${esc(l.id)}" title="Excluir">🗑</button>
     </span>

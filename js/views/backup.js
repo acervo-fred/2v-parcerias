@@ -39,7 +39,7 @@ export async function renderBackup(app) {
         <button class="btn btn-primary" id="btn-export">⬇ Exportar JSON</button>
       </div>
 
-      <div class="chart-card">
+      <div class="chart-card edit-only">
         <h3 style="margin-bottom:10px">Importar backup</h3>
         <p class="muted" style="margin-top:0;font-size:13.5px">Restaura a partir de um JSON exportado. Registros são gravados pelos mesmos IDs.</p>
         <input type="file" id="file-import" accept="application/json" style="display:none" />
@@ -47,14 +47,14 @@ export async function renderBackup(app) {
         <div id="import-status" class="muted" style="font-size:13px;margin-top:8px"></div>
       </div>
 
-      <div class="chart-card">
+      <div class="chart-card edit-only">
         <h3 style="margin-bottom:10px">Migrar localStorage → Firestore</h3>
         <p class="muted" style="margin-top:0;font-size:13.5px">Envia os dados salvos neste navegador para o Firestore. Use uma vez, depois de ligar USE_FIRESTORE.</p>
         <button class="btn btn-primary" id="btn-migrar">🔄 Migrar para Firestore</button>
         <div id="migrar-status" class="muted" style="font-size:13px;margin-top:8px"></div>
       </div>
 
-      <div class="chart-card">
+      <div class="chart-card edit-only">
         <h3 style="margin-bottom:10px">Dados atuais (seed)</h3>
         <p class="muted" style="margin-top:0;font-size:13.5px">Grava o conjunto de dados atual (o já importado da planilha) no backend ativo. Sobrescreve itens de mesmo ID.</p>
         <button class="btn" id="btn-seed">Popular com dados atuais</button>

@@ -14,7 +14,7 @@ import { formatDataBR } from "../ui/dom.js";
 
 export const PERIODO_TIPOS = ["Dia", "Semana", "Mês", "Personalizado"];
 export const PERIODO_MAP = { Dia: "dia", Semana: "semana", "Mês": "mes", Personalizado: "personalizado" };
-const MES_NOMES = [
+export const MES_NOMES = [
   "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
   "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
 ];
@@ -98,6 +98,107 @@ export function dedupLancamentos(lista) {
     }
   }
   return resultado;
+}
+
+function diaSeguinte(iso) {
+  const dt = parseISO(iso);
+  dt.setDate(dt.getDate() + 1);
+  return toISO(dt);
+}
+
+/* Pra cada dia do mês/ano pedidos, diz se algum lançamento cobre esse
+   dia ("ok", verde) ou se dois ou mais lançamentos DO MESMO parceiro
+   com períodos sobrepostos cobrem ("sobreposto", amarelo — mesmo
+   critério de sobreposição que dedupLancamentos já usa pras contas do
+   Dashboard, só que aqui devolve os dias em vez do "vencedor").
+   Linha sem parceiro (faturamento da loja) vira seu próprio grupo. */
+export function statusDiasDoMes(lancamentos, ano, mes) {
+  const ultimoDia = new Date(ano, mes, 0).getDate();
+  const primeiroDoMes = `${ano}-${String(mes).padStart(2, "0")}-01`;
+  const ultimoDoMes = `${ano}-${String(mes).padStart(2, "0")}-${String(ultimoDia).padStart(2, "0")}`;
+
+  const porGrupo = new Map();
+  for (const l of lancamentos) {
+    const chave = l.parceiroId || "__loja__";
+    if (!porGrupo.has(chave)) porGrupo.set(chave, []);
+    porGrupo.get(chave).push(l);
+  }
+
+  const diasOk = new Set();
+  const diasSobrepostos = new Set();
+  for (const lancs of porGrupo.values()) {
+    const ordenados = [...lancs].sort((a, b) => (a.dataInicio || "").localeCompare(b.dataInicio || ""));
+    const clusters = [];
+    for (const l of ordenados) {
+      const fim = l.dataFim || l.dataInicio || "";
+      const ultimo = clusters[clusters.length - 1];
+      if (ultimo && (l.dataInicio || "") <= ultimo.fimMax) {
+        ultimo.itens.push(l);
+        if (fim > ultimo.fimMax) ultimo.fimMax = fim;
+      } else {
+        clusters.push({ itens: [l], inicioMin: l.dataInicio || "", fimMax: fim });
+      }
+    }
+    for (const c of clusters) {
+      const destino = c.itens.length > 1 ? diasSobrepostos : diasOk;
+      const inicio = c.inicioMin < primeiroDoMes ? primeiroDoMes : c.inicioMin;
+      const fim = c.fimMax > ultimoDoMes ? ultimoDoMes : c.fimMax;
+      for (let d = inicio; d <= fim; d = diaSeguinte(d)) destino.add(d);
+    }
+  }
+
+  return Array.from({ length: ultimoDia }, (_, i) => {
+    const dia = i + 1;
+    const iso = `${ano}-${String(mes).padStart(2, "0")}-${String(dia).padStart(2, "0")}`;
+    if (diasSobrepostos.has(iso)) return { dia, status: "sobreposto" };
+    if (diasOk.has(iso)) return { dia, status: "ok" };
+    return { dia, status: "vazio" };
+  });
+}
+
+/* Decide o que gravar quando um novo lançamento (avulso ou linha de
+   lote) se sobrepõe a lançamentos já existentes do MESMO parceiro.
+   Assume que os números do relatório de origem são cumulativos desde
+   o início do período (ex.: "1 a 20/jul" já inclui o que aconteceu de
+   "1 a 14/jul") — por isso, quando o novo período começa no mesmo dia
+   de um já lançado e vai mais longe, grava só a diferença (o pedaço
+   novo), sem tocar no lançamento antigo. Qualquer sobreposição fora
+   desse padrão (datas de início diferentes, período igual ou mais
+   curto) é ambígua demais pra resolver sozinho — devolve o motivo pra
+   quem chamou decidir (normalmente bloqueando o formulário).
+   faturamentoTotal não entra nessa conta — não é mais coletado por
+   cupom no lançamento avulso/lote (ver abrirFaturamentoLoja). */
+export function calcularEntradaLancamento(existentesDoParceiro, novo) {
+  const fimNovo = novo.dataFim || novo.dataInicio;
+  const sobrepostos = existentesDoParceiro.filter((l) => {
+    const fimL = l.dataFim || l.dataInicio || "";
+    return fimL >= novo.dataInicio && (l.dataInicio || "") <= fimNovo;
+  });
+
+  if (sobrepostos.length === 0) {
+    return { tipo: "novo", dataInicio: novo.dataInicio, dataFim: fimNovo, quantidadeUso: novo.quantidadeUso, faturamentoCupom: novo.faturamentoCupom };
+  }
+
+  const mesmoInicio = sobrepostos.filter((l) => l.dataInicio === novo.dataInicio);
+  if (mesmoInicio.length !== 1 || sobrepostos.length > 1) {
+    return { tipo: "ambiguo", motivo: `O período ${formatDataBR(novo.dataInicio)}–${formatDataBR(fimNovo)} se sobrepõe a ${sobrepostos.length} lançamento(s) existente(s) que não começam no mesmo dia — ajuste as datas ou resolva manualmente antes.` };
+  }
+
+  const base = mesmoInicio[0];
+  const fimBase = base.dataFim || base.dataInicio;
+  if (fimNovo === fimBase) {
+    return { tipo: "ambiguo", motivo: `Já existe um lançamento exatamente pra esse período (${formatDataBR(base.dataInicio)}–${formatDataBR(fimBase)}) — edite-o em vez de criar outro.` };
+  }
+  if (fimNovo < fimBase) {
+    return { tipo: "ambiguo", motivo: `Já existe um lançamento mais longo pra esse período (${formatDataBR(base.dataInicio)}–${formatDataBR(fimBase)}) — não dá pra lançar um período menor sobreposto.` };
+  }
+
+  const deltaUso = novo.quantidadeUso - (base.quantidadeUso || 0);
+  const deltaFat = novo.faturamentoCupom - (base.faturamentoCupom || 0);
+  if (deltaUso < 0 || deltaFat < 0) {
+    return { tipo: "ambiguo", motivo: `O período informado se sobrepõe a um lançamento existente (${formatDataBR(base.dataInicio)}–${formatDataBR(fimBase)}), mas os números novos são menores — confira os valores ou edite/exclua o lançamento antigo.` };
+  }
+  return { tipo: "delta", dataInicio: diaSeguinte(fimBase), dataFim: fimNovo, quantidadeUso: deltaUso, faturamentoCupom: deltaFat };
 }
 
 /* Overlap entre o intervalo do lançamento e o período [de, ate]

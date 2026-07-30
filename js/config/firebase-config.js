@@ -31,4 +31,13 @@ export const COLLECTIONS = {
   config: "config", // doc "listas" guarda todas as listas editáveis
   lojas: "lojas", // cada loja tem parceiros/lançamentos próprios (campo lojaId)
   grupos: "grupos", // grupos de cupons (1-4), com período de desconto especial próprio — também por lojaId
+
+  // ---- CRM (Fase 1 — schema novo, populado por migracao.html, ainda
+  // não lido por nenhuma tela) ----
+  partners: "partners", // substitui "parceiros"; subcoleção "interactions" por doc
+  campaigns: "campaigns", // substitui "lancamentos" agrupados por período
+  campaignPartners: "campaignPartners", // junção N:N campanha↔parceiro
+  coupons: "coupons", // cupom como entidade própria (pode ter vários parceiros)
+  couponPartners: "couponPartners", // junção N:N cupom↔parceiro
+  tasks: "tasks", // lembretes/follow-up (nasce de partner.nextAction)
 };

@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Migração Fase 1 — 2V Parcerias</title>
+  <link rel="stylesheet" href="./css/styles.css" />
+  <style>
+    body { background: var(--bg); }
+    .mig-wrap { max-width: 880px; margin: 0 auto; padding: 32px 24px 80px; }
+    .mig-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 26px; font-size: 13px; color: var(--text-soft); }
+    .mig-gate-card { max-width: 420px; margin: 80px auto; text-align: center; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 32px; }
+  </style>
+</head>
+<body>
+  <div class="mig-wrap">
+    <div class="mig-top">
+      <a href="./index.html" class="back-link" style="margin:0">← Voltar pro app</a>
+      <div id="gate-user"></div>
+    </div>
+
+    <h1 class="page-title">Migração Fase 1</h1>
+    <div class="page-sub" style="margin-bottom:26px">Cria o schema novo (partners/campaigns/coupons/tasks) a partir dos dados atuais. Não apaga nem altera parceiros/lançamentos/lojas/grupos.</div>
+
+    <div id="login-gate" class="mig-gate-card">
+      <p style="margin-bottom:16px">Página restrita — entre com uma conta de editor autorizada pra continuar.</p>
+      <button class="btn btn-primary" id="btn-login-gate">Entrar com Google</button>
+      <p id="gate-erro" style="color:var(--c-red-fg); font-size:13px; margin-top:10px"></p>
+    </div>
+
+    <div id="conteudo" hidden>
+      <div class="chart-card" style="margin-bottom:20px">
+        <h3 style="margin-bottom:10px">1. Dry-run</h3>
+        <p class="muted" style="margin-top:0; font-size:13.5px">Lê parceiros/lançamentos/lojas do servidor e mostra o que seria gravado, sem gravar nada ainda.</p>
+        <div class="toolbar">
+          <button class="btn btn-primary" id="btn-dry-run">▶ Rodar dry-run</button>
+          <button class="btn" id="btn-baixar-json" hidden>⬇ Baixar JSON completo</button>
+        </div>
+      </div>
+
+      <div id="relatorio"></div>
+
+      <div id="painel-gravar" class="chart-card" style="margin-top:20px" hidden>
+        <h3 style="margin-bottom:10px">2. Gravar de verdade</h3>
+        <p class="muted" style="margin-top:0; font-size:13.5px">Revise os casos ambíguos acima antes de continuar. A gravação usa IDs determinísticos — pode rodar mais de uma vez com segurança (upsert, não duplica).</p>
+        <div class="toolbar" style="gap:10px">
+          <input class="input" id="input-confirma" placeholder='Digite MIGRAR para confirmar' style="width:220px" />
+          <button class="btn btn-primary" id="btn-gravar" disabled>Gravar no Firestore</button>
+        </div>
+        <div id="status-gravar" class="muted" style="font-size:13px; margin-top:10px"></div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { iniciarMigracao } from "./js/migracao/migrate-ui.js";
+    iniciarMigracao();
+  </script>
+</body>
+</html>

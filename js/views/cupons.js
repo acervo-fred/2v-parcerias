@@ -15,7 +15,9 @@
 import { store } from "../data/store.js";
 import { esc, formatMoeda, formatDataBR } from "../ui/dom.js";
 import { dedupLancamentos, lancamentoNoPeriodo } from "../util/periodo.js";
-import { agruparParceirosPorCupom, chaveCupom } from "../util/cupom.js";
+import { agruparParceirosPorCupom, chaveCupom, descontoAtual } from "../util/cupom.js";
+import { usuarioAtual } from "../data/auth.js";
+import { openModal, fieldText, readValue } from "../ui/modal.js";
 
 const NUM_GRUPOS = 4;
 const DESCONTO_PADRAO = 20;
@@ -40,20 +42,6 @@ async function garantirGrupos() {
     }
   }
   return grupos.sort((a, b) => a.numero - b.numero);
-}
-
-// 20% por padrão (dentro da vigência do próprio cupom, dataInicio/
-// dataVencimento) — 50% só enquanto hoje estiver dentro do período
-// especial configurado no grupo. Devolve também as datas de início/fim
-// de qual dos dois estiver valendo, pra mostrar na lista. Recebe o
-// parceiro representante do cupom consolidado.
-function descontoAtual(rep, porIdGrupo) {
-  const hoje = hojeISO();
-  const g = porIdGrupo[String(rep.grupoCupom || "")];
-  if (g && g.inicio && g.fim && hoje >= g.inicio && hoje <= g.fim) {
-    return { percentual: DESCONTO_ESPECIAL, inicio: g.inicio, fim: g.fim };
-  }
-  return { percentual: DESCONTO_PADRAO, inicio: rep.dataInicio || "", fim: rep.dataVencimento || "" };
 }
 
 // período correspondente a um percentual específico (20% → vigência do
@@ -97,6 +85,7 @@ function csvCampo(valor) {
 }
 
 export async function renderCupons(app) {
+  const podeEditar = !!usuarioAtual();
   const [parceiros, grupos, lancamentosBrutos] = await Promise.all([
     store.listParceirosFechados(),
     garantirGrupos(),
@@ -129,6 +118,7 @@ export async function renderCupons(app) {
     <div class="filter-row" id="aba-grupos">
       <button class="chip active" data-aba="todos">Todos</button>
       ${grupos.map((g) => `<button class="chip" data-aba="${g.numero}">${esc(g.nome)}</button>`).join("")}
+      <button class="btn btn-ghost btn-sm edit-only" id="grp-novo">+ Novo grupo</button>
     </div>
 
     <div id="grupo-painel"></div>
@@ -167,14 +157,16 @@ export async function renderCupons(app) {
     painel.innerHTML = `
       <div class="toolbar" style="margin-bottom:16px; gap:10px; flex-wrap:wrap">
         <strong style="font-size:13.5px">Período desconto 50% — ${esc(g.nome)}:</strong>
-        <input class="input" type="date" id="grp-inicio" value="${g.inicio || ""}" style="width:auto">
+        <input class="input" type="date" id="grp-inicio" value="${g.inicio || ""}" style="width:auto" ${podeEditar ? "" : "readonly"}>
         <span class="muted">até</span>
-        <input class="input" type="date" id="grp-fim" value="${g.fim || ""}" style="width:auto">
-        <button class="btn btn-primary btn-sm" id="grp-salvar">Salvar</button>
+        <input class="input" type="date" id="grp-fim" value="${g.fim || ""}" style="width:auto" ${podeEditar ? "" : "readonly"}>
+        <button class="btn btn-primary btn-sm edit-only" id="grp-salvar">Salvar</button>
         <span class="muted" id="grp-salvo" style="font-size:12px"></span>
         <button class="btn btn-sm" id="grp-exportar" style="margin-left:auto">⬇ Exportar tabela do grupo</button>
+        <button class="btn btn-ghost btn-sm btn-danger edit-only" id="grp-excluir">🗑 Excluir grupo</button>
       </div>
     `;
+    painel.querySelector("#grp-excluir").addEventListener("click", () => excluirGrupo(g));
     painel.querySelector("#grp-salvar").addEventListener("click", async () => {
       const campos = {
         inicio: painel.querySelector("#grp-inicio").value,
@@ -240,7 +232,7 @@ export async function renderCupons(app) {
 
   function rowHtml(lc, uso, fat) {
     const rep = lc.parceiros[0];
-    const d = descontoAtual(rep, porIdGrupo);
+    const d = descontoAtual(rep, grupos);
     const periodoTxt = fmtPeriodo(d);
     const empresas = lc.parceiros.map((p) => p.nome).join(", ");
     return `<tr class="rank-row">
@@ -258,7 +250,7 @@ export async function renderCupons(app) {
       </td>
       <td class="muted cupom-periodo" style="font-size:12.5px">${esc(periodoTxt)}</td>
       <td>
-        <select class="input cupom-grupo" data-chave="${esc(lc.chave)}" style="width:140px">
+        <select class="input cupom-grupo" data-chave="${esc(lc.chave)}" style="width:140px" ${podeEditar ? "" : "disabled"}>
           <option value="">Sem grupo</option>
           ${grupos.map((g) => `<option value="${g.numero}" ${String(rep.grupoCupom || "") === String(g.numero) ? "selected" : ""}>${esc(g.nome)}</option>`).join("")}
         </select>
@@ -278,6 +270,7 @@ export async function renderCupons(app) {
   });
 
   app.querySelector("#aba-grupos").addEventListener("click", (e) => {
+    if (e.target.closest("#grp-novo")) return abrirNovoGrupo();
     const btn = e.target.closest("[data-aba]");
     if (!btn) return;
     aba = btn.dataset.aba;
@@ -285,6 +278,30 @@ export async function renderCupons(app) {
     desenharPainel();
     desenharLista();
   });
+
+  function abrirNovoGrupo() {
+    const proximoNumero = Math.max(0, ...grupos.map((g) => g.numero)) + 1;
+    openModal({
+      title: "Novo grupo",
+      subtitle: "Cria um grupo com período de desconto especial próprio",
+      submitLabel: "Criar",
+      bodyHtml: fieldText("nome", "Nome do grupo", { required: true, value: `Grupo ${proximoNumero}` }),
+      onSubmit: async (form) => {
+        const nome = readValue(form, "nome");
+        if (!nome) throw new Error("Informe o nome do grupo.");
+        await store.addGrupo({ numero: proximoNumero, nome, inicio: "", fim: "" });
+        window.dispatchEvent(new CustomEvent("data-changed"));
+      },
+    });
+  }
+
+  async function excluirGrupo(g) {
+    if (!confirm(`Excluir "${g.nome}"?\n\nOs cupons vinculados a esse grupo voltam pra "Sem grupo".`)) return;
+    const afetados = parceiros.filter((p) => String(p.grupoCupom || "") === String(g.numero));
+    await Promise.all(afetados.map((p) => store.updateParceiro(p.id, { grupoCupom: "" })));
+    await store.removeGrupo(g.id);
+    window.dispatchEvent(new CustomEvent("data-changed"));
+  }
 
   app.querySelector("#busca-cupom").addEventListener("input", (e) => { busca = e.target.value; desenharLista(); });
 

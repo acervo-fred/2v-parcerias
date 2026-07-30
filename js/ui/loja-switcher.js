@@ -27,7 +27,7 @@ export async function initLojaSwitcher() {
         ? ordenadas.map((l) => `<button type="button" class="loja-switcher-opt ${l.id === atual?.id ? "active" : ""}" data-id="${esc(l.id)}">${esc(l.nome)}</button>`).join("")
         : `<div class="loja-switcher-empty">Nenhuma loja cadastrada ainda</div>`}
       <div class="loja-switcher-sep"></div>
-      <button type="button" class="loja-switcher-opt loja-switcher-new" id="loja-switcher-nova">+ Nova loja</button>
+      <button type="button" class="loja-switcher-opt loja-switcher-new edit-only" id="loja-switcher-nova">+ Nova loja</button>
     </div>
   `;
 

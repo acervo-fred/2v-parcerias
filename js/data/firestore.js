@@ -19,6 +19,7 @@ import {
 import { firebaseConfig, COLLECTIONS } from "../config/firebase-config.js";
 import { listas as listasDefault } from "./mock.js";
 import { getLojaAtualId, setLojaAtualId } from "./loja-atual.js";
+import { usuarioAtual } from "./auth.js";
 
 const app = initializeApp(firebaseConfig);
 const fdb = getFirestore(app);
@@ -77,6 +78,7 @@ function enrichLancamento(l) {
   };
 }
 function numOrZero(v) { return Number(v) || 0; }
+function hojeISO() { return new Date().toISOString().slice(0, 10); }
 
 export const firestoreStore = {
   /* ---------- lojas (venues) ---------- */
@@ -103,6 +105,7 @@ export const firestoreStore = {
     await updateDoc(doc(fdb, COLLECTIONS.grupos, id), campos);
     return { id, ...campos };
   },
+  async removeGrupo(id) { await deleteDoc(doc(fdb, COLLECTIONS.grupos, id)); return true; },
 
   /* ---------- listas de configuração ---------- */
   async getListas() {
@@ -152,7 +155,7 @@ export const firestoreStore = {
     return true;
   },
   async fecharParceria(id, dadosCupom) {
-    const campos = { ...dadosCupom, ehParceiro: true };
+    const campos = { ...dadosCupom, ehParceiro: true, statusProspeccao: "Fechado" };
     await updateDoc(doc(fdb, COLLECTIONS.parceiros, id), campos);
     return { id, ...campos };
   },
@@ -212,6 +215,54 @@ export const firestoreStore = {
     return enrichLancamento({ id, ...merged });
   },
   async removeLancamento(id) { await deleteDoc(doc(fdb, COLLECTIONS.lancamentos, id)); return true; },
+
+  /* ---------- CRM (Fase 2/3 — Ficha do Parceiro + Kanban) ---------- */
+  async listPartners() {
+    const lojaId = await lojaAtualIdOuErro();
+    return docsWhere(COLLECTIONS.partners, "lojaId", lojaId);
+  },
+  async getPartner(id) {
+    const snap = await getDoc(doc(fdb, COLLECTIONS.partners, id));
+    return snap.exists() ? { id: snap.id, ...snap.data() } : null;
+  },
+  async updatePartner(id, campos) {
+    const stamped = { ...campos, updatedAt: hojeISO(), updatedBy: usuarioAtual()?.email || "desconhecido" };
+    await updateDoc(doc(fdb, COLLECTIONS.partners, id), stamped);
+    return { id, ...stamped };
+  },
+  async removePartner(id) {
+    const snap = await getDocsFromServer(collection(fdb, COLLECTIONS.partners, id, "interactions"));
+    await Promise.all(snap.docs.map((d) => deleteDoc(d.ref)));
+    await deleteDoc(doc(fdb, COLLECTIONS.partners, id));
+    return true;
+  },
+  async interactionsDoPartner(partnerId) {
+    const snap = await getDocsFromServer(collection(fdb, COLLECTIONS.partners, partnerId, "interactions"));
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  },
+  async addInteraction(partnerId, dados) {
+    const novo = {
+      partnerId, type: dados.type, summary: dados.summary, date: dados.date,
+      authorId: usuarioAtual()?.email || "desconhecido", createdAt: hojeISO(),
+    };
+    const ref = await addDoc(collection(fdb, COLLECTIONS.partners, partnerId, "interactions"), novo);
+    return { id: ref.id, ...novo };
+  },
+  async removeInteraction(partnerId, interactionId) {
+    await deleteDoc(doc(fdb, COLLECTIONS.partners, partnerId, "interactions", interactionId));
+    return true;
+  },
+  async campaignPartnersDoPartner(partnerId) { return docsWhere(COLLECTIONS.campaignPartners, "partnerId", partnerId); },
+  async getCampaign(id) {
+    const snap = await getDoc(doc(fdb, COLLECTIONS.campaigns, id));
+    return snap.exists() ? { id: snap.id, ...snap.data() } : null;
+  },
+  async couponPartnersDoPartner(partnerId) { return docsWhere(COLLECTIONS.couponPartners, "partnerId", partnerId); },
+  async getCoupon(id) {
+    const snap = await getDoc(doc(fdb, COLLECTIONS.coupons, id));
+    return snap.exists() ? { id: snap.id, ...snap.data() } : null;
+  },
 
   /* ---------- BACKUP ---------- */
   async exportAll() {

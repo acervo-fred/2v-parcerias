@@ -136,6 +136,7 @@ const localStore = {
     return structuredClone(novo);
   },
   async updateGrupo(id, campos) { return atualizar(db.grupos, id, campos); },
+  async removeGrupo(id) { return remover(db.grupos, id); },
 
   /* ---------- listas de configuração ---------- */
   async getListas() { return structuredClone(db.listas); },
@@ -188,7 +189,7 @@ const localStore = {
   },
   // transforma um prospecto em parceiro fechado (preenche os campos de cupom)
   async fecharParceria(id, dadosCupom) {
-    return atualizar(db.parceiros, id, { ...dadosCupom, ehParceiro: true });
+    return atualizar(db.parceiros, id, { ...dadosCupom, ehParceiro: true, statusProspeccao: "Fechado" });
   },
 
   /* ---------- LANÇAMENTOS (Base de Dados) ---------- */
@@ -257,6 +258,19 @@ const localStore = {
     return enrichLancamento(l);
   },
   async removeLancamento(id) { return remover(db.lancamentos, id); },
+
+  /* ---------- CRM (Fase 2/3 — só existe no backend Firestore, ver firestore.js) ---------- */
+  async listPartners() { throw new Error("Este recurso do novo CRM ainda não está disponível no modo local (sem Firestore)."); },
+  async getPartner() { throw new Error("Este recurso do novo CRM ainda não está disponível no modo local (sem Firestore)."); },
+  async updatePartner() { throw new Error("Este recurso do novo CRM ainda não está disponível no modo local (sem Firestore)."); },
+  async removePartner() { throw new Error("Este recurso do novo CRM ainda não está disponível no modo local (sem Firestore)."); },
+  async interactionsDoPartner() { throw new Error("Este recurso do novo CRM ainda não está disponível no modo local (sem Firestore)."); },
+  async addInteraction() { throw new Error("Este recurso do novo CRM ainda não está disponível no modo local (sem Firestore)."); },
+  async removeInteraction() { throw new Error("Este recurso do novo CRM ainda não está disponível no modo local (sem Firestore)."); },
+  async campaignPartnersDoPartner() { throw new Error("Este recurso do novo CRM ainda não está disponível no modo local (sem Firestore)."); },
+  async getCampaign() { throw new Error("Este recurso do novo CRM ainda não está disponível no modo local (sem Firestore)."); },
+  async couponPartnersDoPartner() { throw new Error("Este recurso do novo CRM ainda não está disponível no modo local (sem Firestore)."); },
+  async getCoupon() { throw new Error("Este recurso do novo CRM ainda não está disponível no modo local (sem Firestore)."); },
 
   /* ---------- BACKUP ---------- */
   async exportAll() {

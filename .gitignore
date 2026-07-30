@@ -1,3 +1,12 @@
 .DS_Store
 *.xlsx
 files.zip
+
+# dados de referência locais (relatórios/capturas usados pra lançamento manual,
+# e backups de exportação) — nunca vão pro repositório público
+Arquivos LEB/
+Arquivos LM /
+BACKUP/
+*.png
+*.jpeg
+*.jpg

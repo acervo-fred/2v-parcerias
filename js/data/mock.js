@@ -34,10 +34,9 @@ export const listas = {
   ],
   statusProspeccao: [
     { valor: "Prospectar", cor: "gray" },
-    { valor: "Enviado", cor: "blue" },
-    { valor: "Em contato", cor: "violet" },
-    { valor: "Cadastrado", cor: "teal" },
-    { valor: "Sem resposta", cor: "amber" },
+    { valor: "Em contato/Negociação", cor: "amber" },
+    { valor: "Fechado", cor: "green" },
+    { valor: "Sem resposta", cor: "red" },
   ],
   statusCupom: [
     { valor: "Ativo", cor: "green" },
