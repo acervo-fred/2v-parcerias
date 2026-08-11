@@ -1,13 +1,13 @@
-/* Portão de acesso — antes de liberar a página, pergunta se a pessoa
-   quer só ler (sem login) ou editar (login Google, contas
-   autorizadas). "Leitor" fica lembrado neste navegador; "Editor" não
-   precisa ser lembrado à parte porque o Firebase já mantém a sessão
-   entre visitas — só reaparece o portão se a sessão não existir mais
-   (nunca logou, ou saiu). */
+/* Portão de acesso — a página só libera o conteúdo pra quem loga com
+   uma conta Google autorizada (ver data/authorization.js). Quem loga
+   mas não está autorizado cai numa tela de "acesso não autorizado"
+   com a opção de pedir acesso (grava um pedido no Firestore pro
+   admin aprovar na tela #/acessos, ver views/acessos.js). */
 
-import { onAuthChange, loginComGoogle } from "../data/auth.js";
-
-const LS_KEY = "acesso_modo";
+import { onAuthChange, loginComGoogle, logout } from "../data/auth.js";
+import { estaAutorizado } from "../data/authorization.js";
+import { pedirAcesso, minhaSolicitacao } from "../data/access-requests.js";
+import { esc } from "./dom.js";
 
 function primeiroEstadoAuth() {
   return new Promise((resolve) => {
@@ -21,60 +21,105 @@ function montarOverlay() {
   overlay.innerHTML = `
     <div class="gate-card">
       <div class="gate-logo"><span class="side-logo-badge">2V</span> Parcerias</div>
-      <h1 class="gate-titulo">Como você quer entrar?</h1>
-      <div class="gate-opcoes">
-        <button type="button" class="gate-opcao" data-modo="leitor">
-          <span class="gate-opcao-titulo">Leitor</span>
-          <span class="gate-opcao-desc">Só visualizar, sem login.</span>
-        </button>
-        <button type="button" class="gate-opcao" data-modo="editor">
-          <span class="gate-opcao-titulo">Editor</span>
-          <span class="gate-opcao-desc">Entrar com Google para editar.</span>
-        </button>
-      </div>
-      <div class="gate-erro" style="display:none"></div>
+      <div class="gate-corpo"></div>
     </div>
   `;
   document.body.appendChild(overlay);
   return overlay;
 }
 
-/* Resolve quando a pessoa pode seguir em frente (escolheu um modo
-   agora, ou já tinha escolhido/logado antes). Enquanto isso, cobre a
-   tela inteira — chame antes de renderizar qualquer conteúdo. */
+function telaLogin(corpo, { erro = "" } = {}) {
+  corpo.innerHTML = `
+    <h1 class="gate-titulo">Entrar</h1>
+    <p class="gate-texto">Acesso restrito. Entre com uma conta Google autorizada.</p>
+    <button type="button" class="btn btn-primary" id="gate-btn-login">Entrar com Google</button>
+    ${erro ? `<div class="gate-erro">${esc(erro)}</div>` : ""}
+  `;
+}
+
+function telaBloqueado(corpo, usuario, { enviado = false, erro = "" } = {}) {
+  corpo.innerHTML = `
+    <h1 class="gate-titulo">Acesso não autorizado</h1>
+    <p class="gate-texto">
+      <strong>${esc(usuario.email)}</strong> não está liberado pra acessar a Plataforma 2V.
+    </p>
+    ${enviado
+      ? `<p class="gate-texto gate-texto-ok">Pedido enviado. Você será avisado quando o acesso for liberado.</p>`
+      : `<button type="button" class="btn btn-primary" id="gate-btn-pedir">Pedir acesso</button>`}
+    ${erro ? `<div class="gate-erro">${esc(erro)}</div>` : ""}
+    <button type="button" class="btn btn-ghost btn-sm gate-sair" id="gate-btn-sair">Sair / trocar de conta</button>
+  `;
+}
+
+/* Resolve quando a pessoa pode seguir em frente (já está autorizada
+   agora ou já estava logada com conta autorizada). Enquanto isso,
+   cobre a tela inteira — chame antes de renderizar qualquer conteúdo. */
 export async function iniciarPortaoAcesso() {
   const usuario = await primeiroEstadoAuth();
-  if (usuario) return; // sessão de editor já ativa
-  if (localStorage.getItem(LS_KEY) === "leitor") return;
+  if (usuario && (await estaAutorizado(usuario))) return;
 
   const overlay = montarOverlay();
-  const erroEl = overlay.querySelector(".gate-erro");
+  const corpo = overlay.querySelector(".gate-corpo");
 
   return new Promise((resolve) => {
-    overlay.addEventListener("click", async (e) => {
-      const btn = e.target.closest("[data-modo]");
-      if (!btn) return;
+    let usuarioAtual = usuario;
 
-      if (btn.dataset.modo === "leitor") {
-        localStorage.setItem(LS_KEY, "leitor");
+    async function desenharBloqueado(usr) {
+      let jaEnviado = false;
+      try {
+        jaEnviado = !!(await minhaSolicitacao(usr));
+      } catch (err) {
+        console.error(err);
+      }
+      telaBloqueado(corpo, usr, { enviado: jaEnviado });
+    }
+
+    async function desenhar(usr) {
+      if (usr && (await estaAutorizado(usr))) {
+        unsub();
         overlay.remove();
         resolve();
         return;
       }
-
-      // editor
-      overlay.querySelectorAll("[data-modo]").forEach((b) => (b.disabled = true));
-      erroEl.style.display = "none";
-      try {
-        await loginComGoogle();
-        overlay.remove();
-        resolve();
-      } catch (err) {
-        console.error(err);
-        erroEl.textContent = "Não foi possível entrar com o Google. Tente de novo.";
-        erroEl.style.display = "block";
-        overlay.querySelectorAll("[data-modo]").forEach((b) => (b.disabled = false));
+      if (usr) {
+        desenharBloqueado(usr);
+      } else {
+        telaLogin(corpo);
       }
+    }
+
+    corpo.addEventListener("click", async (e) => {
+      if (e.target.id === "gate-btn-login") {
+        e.target.disabled = true;
+        try {
+          await loginComGoogle();
+          // onAuthChange abaixo cuida de redesenhar
+        } catch (err) {
+          console.error(err);
+          telaLogin(corpo, { erro: "Não foi possível entrar com o Google. Tente de novo." });
+        }
+        return;
+      }
+      if (e.target.id === "gate-btn-pedir") {
+        e.target.disabled = true;
+        try {
+          await pedirAcesso(usuarioAtual);
+          telaBloqueado(corpo, usuarioAtual, { enviado: true });
+        } catch (err) {
+          console.error(err);
+          telaBloqueado(corpo, usuarioAtual, { erro: "Não foi possível enviar o pedido. Tente de novo." });
+        }
+        return;
+      }
+      if (e.target.id === "gate-btn-sair") {
+        e.target.disabled = true;
+        await logout();
+      }
+    });
+
+    const unsub = onAuthChange((usr) => {
+      usuarioAtual = usr;
+      desenhar(usr);
     });
   });
 }

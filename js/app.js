@@ -8,9 +8,11 @@ import { renderCupons } from "./views/cupons.js";
 import { renderLancamentos } from "./views/lancamentos.js";
 import { renderDashboard } from "./views/dashboard.js";
 import { renderBackup } from "./views/backup.js";
+import { renderAcessos } from "./views/acessos.js";
 import { initLojaSwitcher } from "./ui/loja-switcher.js";
 import { esc } from "./ui/dom.js";
 import { onAuthChange, loginComGoogle, logout } from "./data/auth.js";
+import { isAdminPrincipal } from "./data/authorization.js";
 import { iniciarPortaoAcesso } from "./ui/access-gate.js";
 
 const app = document.getElementById("app");
@@ -65,6 +67,9 @@ async function router() {
       case "backup":
         await renderBackup(app);
         break;
+      case "acessos":
+        await renderAcessos(app);
+        break;
       default:
         app.innerHTML = `<a class="back-link" href="#/">← Voltar</a>
           <div class="empty">Página não encontrada.</div>`;
@@ -81,6 +86,7 @@ function renderAuthBox(usuario) {
   // css/styles.css) — registrado cedo o bastante (antes do primeiro
   // router()) pra já estar certo no primeiro desenho da página
   document.body.classList.toggle("is-editor", !!usuario);
+  document.body.classList.toggle("is-admin", isAdminPrincipal(usuario));
 
   const box = document.getElementById("auth-box");
   if (!box) return;
@@ -92,11 +98,15 @@ function renderAuthBox(usuario) {
     box.querySelector("#btn-logout").addEventListener("click", async () => {
       if (!confirm("Sair da conta?")) return;
       await logout();
+      // acesso agora exige login em todas as telas — recarrega pra
+      // reaparecer o portão de acesso em vez de deixar a página aberta
+      // sem permissão de leitura
+      location.reload();
     });
   } else {
-    // quem escolheu "Leitor" no portão de entrada ainda pode virar
-    // editor depois, sem precisar recarregar a página
-    box.innerHTML = `<button class="auth-link" id="btn-login">Entrar como editor</button>`;
+    // rede de segurança: na prática o portão de acesso já garante que
+    // ninguém chega até aqui sem estar logado com conta autorizada
+    box.innerHTML = `<button class="auth-link" id="btn-login">Entrar</button>`;
     box.querySelector("#btn-login").addEventListener("click", async () => {
       try {
         await loginComGoogle();

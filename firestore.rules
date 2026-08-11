@@ -3,40 +3,67 @@ rules_version = '2';
 // ============================================================
 // Regras do Firestore — projeto dedicado ao 2V Parcerias
 // ============================================================
-// Leitura livre pra todo mundo. Escrita só pra quem estiver logado
-// com uma das contas Google autorizadas abaixo.
+// Leitura E escrita só pra quem estiver autorizado:
+//   1) o admin principal (e-mail fixo abaixo), OU
+//   2) qualquer e-mail presente na coleção authorizedEmails — lista
+//      gerenciada pelo admin direto no app (tela #/acessos), sem
+//      precisar mexer/republicar este arquivo a cada pessoa nova.
+// Quem não está autorizado pode criar um pedido em accessRequests
+// pro admin aprovar.
 // ============================================================
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    function isAdminPrincipal() {
+      return request.auth != null && request.auth.token.email == "fredericoessinger@gmail.com";
+    }
+
     function emailAutorizado() {
-      return request.auth != null && request.auth.token.email in [
-        "fredericoessinger@gmail.com",
-        "manuela.goulart@grupotrigo.com.br",
-        "gmanuelajacome@gmail.com",
-        "acervo@girostraffic.page"
-      ];
+      return request.auth != null && (
+        isAdminPrincipal() ||
+        exists(/databases/$(database)/documents/authorizedEmails/$(request.auth.token.email))
+      );
     }
 
     // ---- coleções atuais ----
-    match /parceiros/{document=**}    { allow read: if true; allow write: if emailAutorizado(); }
-    match /lancamentos/{document=**}  { allow read: if true; allow write: if emailAutorizado(); }
-    match /config/{document=**}       { allow read: if true; allow write: if emailAutorizado(); }
-    match /lojas/{document=**}        { allow read: if true; allow write: if emailAutorizado(); }
-    match /grupos/{document=**}       { allow read: if true; allow write: if emailAutorizado(); }
+    match /parceiros/{document=**}    { allow read, write: if emailAutorizado(); }
+    match /lancamentos/{document=**}  { allow read, write: if emailAutorizado(); }
+    match /config/{document=**}       { allow read, write: if emailAutorizado(); }
+    match /lojas/{document=**}        { allow read, write: if emailAutorizado(); }
+    match /grupos/{document=**}       { allow read, write: if emailAutorizado(); }
 
     // ---- CRM (Fase 1 — schema novo, ver migracao.html) ----
     match /partners/{partnerId} {
-      allow read: if true;
-      allow write: if emailAutorizado();
-      match /interactions/{document=**} { allow read: if true; allow write: if emailAutorizado(); }
+      allow read, write: if emailAutorizado();
+      match /interactions/{document=**} { allow read, write: if emailAutorizado(); }
     }
-    match /campaigns/{document=**}        { allow read: if true; allow write: if emailAutorizado(); }
-    match /campaignPartners/{document=**} { allow read: if true; allow write: if emailAutorizado(); }
-    match /coupons/{document=**}          { allow read: if true; allow write: if emailAutorizado(); }
-    match /couponPartners/{document=**}   { allow read: if true; allow write: if emailAutorizado(); }
-    match /tasks/{document=**}            { allow read: if true; allow write: if emailAutorizado(); }
+    match /campaigns/{document=**}        { allow read, write: if emailAutorizado(); }
+    match /campaignPartners/{document=**} { allow read, write: if emailAutorizado(); }
+    match /coupons/{document=**}          { allow read, write: if emailAutorizado(); }
+    match /couponPartners/{document=**}   { allow read, write: if emailAutorizado(); }
+    match /tasks/{document=**}            { allow read, write: if emailAutorizado(); }
+
+    // ---- E-mails autorizados (gerenciado pelo admin, tela #/acessos) ----
+    match /authorizedEmails/{email} {
+      allow get: if request.auth != null && (request.auth.token.email == email || isAdminPrincipal());
+      allow list: if emailAutorizado();
+      allow write: if isAdminPrincipal();
+    }
+
+    // ---- Pedidos de acesso ----
+    // Qualquer pessoa logada com o Google pode criar/atualizar SÓ o
+    // próprio pedido (doc id = uid) e ler o status dele. Qualquer
+    // e-mail autorizado pode ver a fila; só o admin principal
+    // aprova/recusa (aprovar = escrever em authorizedEmails + apagar
+    // o pedido, tudo pela tela #/acessos).
+    match /accessRequests/{uid} {
+      allow get: if request.auth != null && (request.auth.uid == uid || emailAutorizado());
+      allow list: if emailAutorizado();
+      allow create, update: if request.auth != null && request.auth.uid == uid
+                             && request.resource.data.email == request.auth.token.email;
+      allow delete: if isAdminPrincipal();
+    }
 
     // Nada mais é exposto.
   }

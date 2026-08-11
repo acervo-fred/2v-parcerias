@@ -40,4 +40,7 @@ export const COLLECTIONS = {
   coupons: "coupons", // cupom como entidade própria (pode ter vários parceiros)
   couponPartners: "couponPartners", // junção N:N cupom↔parceiro
   tasks: "tasks", // lembretes/follow-up (nasce de partner.nextAction)
+
+  accessRequests: "accessRequests", // pedidos de acesso de quem logou mas não está autorizado
+  authorizedEmails: "authorizedEmails", // e-mails liberados pelo admin (ver js/data/authorization.js)
 };
