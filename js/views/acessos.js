@@ -4,13 +4,29 @@
    lista de e-mails liberados (authorizedEmails), sem precisar tocar
    no firestore.rules pra cada pessoa nova. Rota #/acessos. */
 
-import { usuarioAtual } from "../data/auth.js";
+import { usuarioAtual, criarContaEmailSenha } from "../data/auth.js";
 import { isAdminPrincipal } from "../data/authorization.js";
 import {
   listarPedidos, aprovarPedido, recusarPedido,
   listarAutorizados, liberarAcesso, revogarAcesso,
 } from "../data/access-requests.js";
 import { esc } from "../ui/dom.js";
+
+function gerarSenhaTemporaria() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+  let s = "";
+  for (let i = 0; i < 12; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  return s;
+}
+
+function mensagemErroCriacaoConta(err) {
+  const code = err && err.code;
+  if (code === "auth/email-already-in-use") {
+    return "Já existe uma conta de e-mail/senha pra esse e-mail. Se a pessoa esqueceu a senha, avise o Claude pra adicionar uma opção de redefinir.";
+  }
+  if (code === "auth/invalid-email") return "E-mail inválido.";
+  return (err && err.message) || "Erro desconhecido.";
+}
 
 function formatData(ts) {
   if (!ts) return "—";
@@ -50,6 +66,20 @@ export async function renderAcessos(app) {
     <div class="chart-card">
       <h3 style="margin-bottom:12px">Acessos liberados</h3>
       <div id="lista-autorizados" class="muted">Carregando…</div>
+    </div>
+
+    <div class="chart-card" style="margin-top:20px">
+      <h3 style="margin-bottom:12px">Criar acesso por e-mail e senha</h3>
+      <p class="muted" style="font-size:13px;margin-top:0">
+        Alternativa ao login com Google, pra quem tem bloqueio de login corporativo (comum em contas Workspace tipo @grupotrigo.com.br).
+        Gera uma senha temporária pra você compartilhar com a pessoa fora do app (WhatsApp, etc.) — ela só aparece uma vez aqui.
+        Isso não libera o acesso sozinho: também cadastra o e-mail na lista "Acessos liberados" acima.
+      </p>
+      <div style="display:flex; gap:8px">
+        <input type="email" id="conta-email" class="input" placeholder="nome@exemplo.com" style="flex:1" />
+        <button type="button" class="btn btn-primary" id="btn-criar-conta">Criar conta</button>
+      </div>
+      <div id="conta-status" class="muted" style="font-size:13px;margin-top:8px"></div>
     </div>
   `;
 
@@ -157,6 +187,27 @@ export async function renderAcessos(app) {
       await carregarAutorizados();
     } catch (err) {
       liberarStatus.textContent = "✗ Erro: " + err.message;
+    }
+  });
+
+  const contaStatus = app.querySelector("#conta-status");
+  app.querySelector("#btn-criar-conta").addEventListener("click", async () => {
+    const input = app.querySelector("#conta-email");
+    const email = input.value.trim();
+    if (!email || !email.includes("@")) {
+      contaStatus.textContent = "Digite um e-mail válido.";
+      return;
+    }
+    const senha = gerarSenhaTemporaria();
+    contaStatus.textContent = "Criando…";
+    try {
+      await criarContaEmailSenha(email, senha);
+      await liberarAcesso(email, admin);
+      input.value = "";
+      contaStatus.innerHTML = `✓ Conta criada. Senha temporária: <code>${esc(senha)}</code> — copie e mande pra pessoa agora, ela não fica salva em nenhum lugar.`;
+      await carregarAutorizados();
+    } catch (err) {
+      contaStatus.textContent = "✗ Erro: " + mensagemErroCriacaoConta(err);
     }
   });
 

@@ -4,10 +4,20 @@
    com a opção de pedir acesso (grava um pedido no Firestore pro
    admin aprovar na tela #/acessos, ver views/acessos.js). */
 
-import { onAuthChange, loginComGoogle, logout } from "../data/auth.js";
+import { onAuthChange, loginComGoogle, loginComEmailSenha, logout } from "../data/auth.js";
 import { estaAutorizado } from "../data/authorization.js";
 import { pedirAcesso, minhaSolicitacao } from "../data/access-requests.js";
 import { esc } from "./dom.js";
+
+function mensagemErroLoginSenha(err) {
+  const code = err && err.code;
+  if (code === "auth/invalid-credential" || code === "auth/wrong-password" || code === "auth/user-not-found") {
+    return "E-mail ou senha incorretos.";
+  }
+  if (code === "auth/too-many-requests") return "Muitas tentativas — espere um pouco e tente de novo.";
+  if (code === "auth/invalid-email") return "E-mail inválido.";
+  return "Não foi possível entrar. Tente de novo.";
+}
 
 function primeiroEstadoAuth() {
   return new Promise((resolve) => {
@@ -28,11 +38,16 @@ function montarOverlay() {
   return overlay;
 }
 
-function telaLogin(corpo, { erro = "" } = {}) {
+function telaLogin(corpo, { erro = "", email = "" } = {}) {
   corpo.innerHTML = `
     <h1 class="gate-titulo">Entrar</h1>
     <p class="gate-texto">Acesso restrito. Entre com uma conta Google autorizada.</p>
     <button type="button" class="btn btn-primary" id="gate-btn-login">Entrar com Google</button>
+    <div class="gate-divisor">ou entre com e-mail e senha</div>
+    <input type="email" id="gate-email" class="input" placeholder="E-mail" autocomplete="username" value="${esc(email)}" style="margin-bottom:8px" />
+    <input type="password" id="gate-senha" class="input" placeholder="Senha" autocomplete="current-password" style="margin-bottom:8px" />
+    <button type="button" class="btn btn-ghost" id="gate-btn-senha" style="width:100%">Entrar com e-mail e senha</button>
+    <p class="gate-texto" style="font-size:12.5px;margin:10px 0 0">Sem conta de e-mail/senha ainda? Fale com o admin — ela é criada pra quem tem bloqueio no login do Google corporativo.</p>
     ${erro ? `<div class="gate-erro">${esc(erro)}</div>` : ""}
   `;
 }
@@ -100,6 +115,23 @@ export async function iniciarPortaoAcesso() {
         }
         return;
       }
+      if (e.target.id === "gate-btn-senha") {
+        e.target.disabled = true;
+        const email = corpo.querySelector("#gate-email").value.trim();
+        const senha = corpo.querySelector("#gate-senha").value;
+        if (!email || !senha) {
+          telaLogin(corpo, { erro: "Preencha e-mail e senha.", email });
+          return;
+        }
+        try {
+          await loginComEmailSenha(email, senha);
+          // onAuthChange abaixo cuida de redesenhar
+        } catch (err) {
+          console.error(err);
+          telaLogin(corpo, { erro: mensagemErroLoginSenha(err), email });
+        }
+        return;
+      }
       if (e.target.id === "gate-btn-pedir") {
         e.target.disabled = true;
         try {
@@ -114,6 +146,13 @@ export async function iniciarPortaoAcesso() {
       if (e.target.id === "gate-btn-sair") {
         e.target.disabled = true;
         await logout();
+      }
+    });
+
+    corpo.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && (e.target.id === "gate-email" || e.target.id === "gate-senha")) {
+        e.preventDefault();
+        corpo.querySelector("#gate-btn-senha")?.click();
       }
     });
 

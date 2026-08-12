@@ -604,6 +604,11 @@ button { font: inherit; }
 .gate-opcao:disabled { opacity: 0.6; cursor: default; }
 .gate-opcao-titulo { font-size: 15.5px; font-weight: 650; color: var(--text); }
 .gate-opcao-desc { font-size: 12.5px; color: var(--text-faint); }
+.gate-divisor {
+  display: flex; align-items: center; gap: 10px; margin: 18px 0 14px;
+  font-size: 12px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.4px;
+}
+.gate-divisor::before, .gate-divisor::after { content: ""; flex: 1; height: 1px; background: var(--border); }
 .gate-erro { margin-top: 16px; font-size: 13px; color: var(--c-red-fg); }
 .gate-sair { display: block; margin: 18px auto 0; }
 @media (max-width: 480px) {
