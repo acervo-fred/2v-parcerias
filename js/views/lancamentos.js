@@ -117,7 +117,7 @@ export async function renderLancamentos(app) {
   });
 }
 
-const DIAS_SEMANA = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+const DIAS_SEMANA = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
 
 function abrirCalendarioMes(lancamentos) {
   const hoje = new Date();
@@ -151,7 +151,7 @@ function abrirCalendarioMes(lancamentos) {
       function desenhar() {
         titulo.textContent = `${MES_NOMES[mes - 1]} / ${ano}`;
         const dias = statusDiasDoMes(lancamentos, ano, mes);
-        const offset = new Date(ano, mes - 1, 1).getDay();
+        const offset = (new Date(ano, mes - 1, 1).getDay() + 6) % 7; // segunda-feira primeiro
         const celulas = [];
         for (let i = 0; i < offset; i++) celulas.push(`<div class="cal-dia cal-dia--fora"></div>`);
         dias.forEach((d) => celulas.push(`<div class="cal-dia cal-dia--${d.status}">${d.dia}</div>`));

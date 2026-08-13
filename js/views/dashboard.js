@@ -22,7 +22,7 @@
 
 import { store } from "../data/store.js";
 import { esc, formatMoeda } from "../ui/dom.js";
-import { lancamentoNoPeriodo, dedupLancamentos } from "../util/periodo.js";
+import { lancamentoNoPeriodo, dedupLancamentos, inicioSemanaISO, fimSemanaISO, chaveSemana, rotuloSemanaCurto } from "../util/periodo.js";
 import { agruparParceirosPorCupom, chaveCupom } from "../util/cupom.js";
 
 const MES_NOMES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
@@ -60,23 +60,27 @@ export async function renderDashboard(app) {
       <div><h1 class="page-title">Desempenho dos cupons 2V${lojaAtual ? ` - ${esc(lojaAtual.nome)}` : ""}</h1></div>
     </div>
 
-    <div class="filter-row" id="presets" style="margin-bottom:14px; align-items:center">
-      ${["semana", "mes", "mespassado", "ano", "tudo"].map((p) =>
-        `<button class="chip ${p === "mes" ? "active" : ""}" data-preset="${p}">${presetLabel(p)}</button>`
-      ).join("")}
-      ${mesesComDados.length ? `
-        <select class="input select-compact" id="f-mes" style="width:auto">
-          <option value="">Mês…</option>
-          ${mesesComDados.map((m) => `<option value="${m}">${mesLabelLongo(m)}</option>`).join("")}
-        </select>` : ""}
+    <div class="filter-row" id="presets" style="margin-bottom:14px; align-items:flex-end">
+      <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center">
+        ${["semana", "semanapassada", "mes", "mespassado", "tudo"].map((p) =>
+          `<button class="chip ${p === "mes" ? "active" : ""}" data-preset="${p}">${presetLabel(p)}</button>`
+        ).join("")}
+        ${mesesComDados.length ? `
+          <select class="input select-compact" id="f-mes" style="width:auto">
+            <option value="">Mês…</option>
+            ${mesesComDados.map((m) => `<option value="${m}">${mesLabelLongo(m)}</option>`).join("")}
+          </select>` : ""}
+      </div>
+      <div class="field" style="margin-bottom:0"><label>De</label><input class="input" type="date" id="f-de" value="${deInicial}"></div>
+      <div class="field" style="margin-bottom:0"><label>Até</label><input class="input" type="date" id="f-ate" value="${ateInicial}"></div>
     </div>
-    <div class="toolbar" style="margin-bottom:14px; gap:10px; align-items:flex-end; flex-wrap:wrap">
+    <div class="toolbar" style="margin-bottom:14px; gap:24px; align-items:flex-end; flex-wrap:wrap">
       <div class="field" style="margin-bottom:0"><label>Cupom</label>
-        <select class="input select-compact" id="f-cupom">
+        <select class="input select-compact select-narrow" id="f-cupom">
           <option value="">Todos os cupons</option>
           ${cuponsOrdenados.map((lc) => {
             const nomes = lc.parceiros.map((p) => p.nome).join(", ");
-            return `<option value="${esc(lc.chave)}" title="${esc(lc.cupom)} — ${esc(nomes)}">${esc(lc.cupom)} — ${esc(nomes)}</option>`;
+            return `<option value="${esc(lc.chave)}" title="${esc(lc.cupom)} — ${esc(nomes)}">${esc(lc.cupom)}</option>`;
           }).join("")}
         </select>
       </div>
@@ -86,8 +90,6 @@ export async function renderDashboard(app) {
           ${(listas.tipoNegocio || []).map((t) => `<option value="${esc(t.valor)}">${esc(t.valor)}</option>`).join("")}
         </select>
       </div>
-      <div class="field" style="margin-bottom:0"><label>De</label><input class="input" type="date" id="f-de" value="${deInicial}"></div>
-      <div class="field" style="margin-bottom:0"><label>Até</label><input class="input" type="date" id="f-ate" value="${ateInicial}"></div>
     </div>
     <div class="muted" id="comparacao-nota" style="font-size:12px;margin-bottom:18px"></div>
 
@@ -105,12 +107,12 @@ export async function renderDashboard(app) {
       <div class="dash-cols" style="display:grid;grid-template-columns:1.6fr 1fr;gap:20px;margin-bottom:20px;align-items:start">
         <div class="chart-card">
           <div class="chart-card-head">
-            <h3>Faturamento por mês <span class="muted" style="font-size:11px;font-weight:600">— histórico completo</span></h3>
+            <h3>Faturamento por semana <span class="muted" style="font-size:11px;font-weight:600">— todos os cupons, no período selecionado</span></h3>
             <button class="chart-toggle" id="toggle-mes" type="button">Ver tabela</button>
           </div>
           <div id="chart-mes"></div>
           <table class="chart-table" id="tabela-mes">
-            <thead><tr><th>Mês</th><th>Faturamento via cupom</th></tr></thead>
+            <thead><tr><th>Semana</th><th>Faturamento via cupom</th></tr></thead>
             <tbody id="tabela-mes-body"></tbody>
           </table>
         </div>
@@ -123,7 +125,7 @@ export async function renderDashboard(app) {
 
       <div class="dash-cols" style="display:grid;grid-template-columns:1.6fr 1fr;gap:20px;margin-bottom:20px;align-items:start">
         <div class="chart-card">
-          <h3>Evolução do uso de cupons <span class="muted" style="font-size:11px;font-weight:600">— histórico completo</span></h3>
+          <h3>Evolução do uso de cupons <span class="muted" style="font-size:11px;font-weight:600">— todos os cupons, no período selecionado</span></h3>
           <div id="chart-uso"></div>
         </div>
         <div class="chart-card">
@@ -189,7 +191,6 @@ export async function renderDashboard(app) {
 
     const doPeriodo = filtrarTudo(lancamentos, porId, chavePorParceiroId, { de, ate, ...dims });
     const doPeriodoAnterior = comparavel ? filtrarTudo(lancamentos, porId, chavePorParceiroId, { de: deAnt, ate: ateAnt, ...dims }) : [];
-    const lancamentosDim = filtrarDimensoes(lancamentos, porId, chavePorParceiroId, dims);
 
     app.querySelector("#comparacao-nota").textContent = comparavel
       ? `Comparado com o período imediatamente anterior de mesma duração (${formatDataBRlocal(deAnt)} – ${formatDataBRlocal(ateAnt)}).`
@@ -200,8 +201,17 @@ export async function renderDashboard(app) {
     desenharRanking(app, doPeriodo, chavePorParceiroId, porChave);
     desenharRankingUsos(app, doPeriodo, chavePorParceiroId, porChave);
     desenharParticipacao(app, doPeriodo, chavePorParceiroId, porChave);
-    desenharChartUsoMensal(app, lancamentosDim);
-    desenharChartMes(app, lancamentosDim);
+
+    // gráficos "por semana": sempre o total de todos os cupons (não
+    // filtram por Cupom/Tipo — ver desenharChartMes/desenharChartUsoMensal),
+    // e sempre mostram TODA semana do período selecionado, mesmo sem
+    // lançamento (fica em zero) — ver semanasNoPeriodo. Sem De/Até
+    // selecionado ("Tudo"), usa o intervalo real dos dados como limite.
+    const [deSemanas, ateSemanas] = limitesEfetivos(lancamentos, de, ate);
+    const semanas = semanasNoPeriodo(deSemanas, ateSemanas);
+    const lancamentosNoPeriodoTotal = filtrarPeriodo(lancamentos, deSemanas, ateSemanas);
+    desenharChartUsoMensal(app, lancamentosNoPeriodoTotal, semanas);
+    desenharChartMes(app, lancamentosNoPeriodoTotal, semanas);
 
     linhasRanking = calcularLinhasRanking(doPeriodo, doPeriodoAnterior, chavePorParceiroId, porChave, comparavel);
     desenharTabela();
@@ -310,23 +320,23 @@ export async function renderDashboard(app) {
 
 /* ---------- período: presets ---------- */
 function presetLabel(p) {
-  return { semana: "Esta semana", mes: "Este mês", mespassado: "Mês passado", ano: "Este ano", tudo: "Tudo" }[p] || p;
+  return { semana: "Esta semana", semanapassada: "Semana passada", mes: "Este mês", mespassado: "Mês passado", tudo: "Tudo" }[p] || p;
 }
 function presetRange(nome) {
   const hoje = new Date();
   const iso = (d) => d.toISOString().slice(0, 10);
   if (nome === "semana") {
-    const de = new Date(hoje); de.setDate(de.getDate() - 6);
-    return [iso(de), iso(hoje)];
+    return [inicioSemanaISO(hoje), fimSemanaISO(hoje)];
+  }
+  if (nome === "semanapassada") {
+    const ref = new Date(hoje); ref.setDate(ref.getDate() - 7);
+    return [inicioSemanaISO(ref), fimSemanaISO(ref)];
   }
   if (nome === "mes") {
     return [iso(new Date(hoje.getFullYear(), hoje.getMonth(), 1)), iso(hoje)];
   }
   if (nome === "mespassado") {
     return [iso(new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1)), iso(new Date(hoje.getFullYear(), hoje.getMonth(), 0))];
-  }
-  if (nome === "ano") {
-    return [iso(new Date(hoje.getFullYear(), 0, 1)), iso(hoje)];
   }
   return ["", ""]; // tudo
 }
@@ -339,6 +349,38 @@ function periodoAnterior(de, ate) {
   const anteriorAte = new Date(dDe); anteriorAte.setDate(anteriorAte.getDate() - 1);
   const anteriorDe = new Date(anteriorAte); anteriorDe.setDate(anteriorDe.getDate() - diasNoPeriodo);
   return [iso(anteriorDe), iso(anteriorAte)];
+}
+// intervalo real a usar nos gráficos "por semana": o período selecionado
+// (De/Até), ou — sem período selecionado ("Tudo") — o intervalo entre o
+// primeiro e o último lançamento, pra sempre ter limites concretos e dar
+// pra enumerar toda semana do meio (mesmo as sem lançamento nenhum).
+function limitesEfetivos(todosLancamentos, de, ate) {
+  if (de && ate) return [de, ate];
+  const datas = todosLancamentos.map((l) => l.dataInicio).filter(Boolean).sort();
+  if (!datas.length) return ["", ""];
+  return [de || datas[0], ate || datas[datas.length - 1]];
+}
+function proximaSemanaISO(iso) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() + 7);
+  const yy = dt.getFullYear(), mm = String(dt.getMonth() + 1).padStart(2, "0"), dd = String(dt.getDate()).padStart(2, "0");
+  return `${yy}-${mm}-${dd}`;
+}
+// toda segunda-feira (ISO) entre a semana de `de` e a semana de `ate`,
+// inclusive — inclui semanas sem nenhum lançamento, pra elas aparecerem
+// zeradas nos gráficos em vez de simplesmente sumirem do eixo.
+function semanasNoPeriodo(de, ate) {
+  if (!de || !ate) return [];
+  const ultima = chaveSemana(ate);
+  const semanas = [];
+  let cursor = chaveSemana(de);
+  let guarda = 0;
+  while (cursor <= ultima && guarda++ < 1000) {
+    semanas.push(cursor);
+    cursor = proximaSemanaISO(cursor);
+  }
+  return semanas;
 }
 function formatDataBRlocal(iso) {
   if (!iso || !/^\d{4}-\d{2}-\d{2}/.test(iso)) return "—";
@@ -631,15 +673,14 @@ function tabelaRowHtml(l) {
 }
 
 /* ---------- render: linha (SVG) — genérico, usado por faturamento/mês e ticket médio ---------- */
-function desenharChartMes(app, lancamentosDim) {
-  const porMes = new Map();
-  for (const l of lancamentosDim) {
-    const mes = (l.dataInicio || "").slice(0, 7);
-    if (!mes) continue;
-    porMes.set(mes, (porMes.get(mes) || 0) + l.faturamentoCupom);
+function desenharChartMes(app, lancamentosPeriodo, semanas) {
+  const porSemana = new Map();
+  for (const l of lancamentosPeriodo) {
+    if (!l.dataInicio) continue;
+    const semana = chaveSemana(l.dataInicio);
+    porSemana.set(semana, (porSemana.get(semana) || 0) + l.faturamentoCupom);
   }
-  const meses = [...porMes.keys()].sort();
-  const pontos = meses.map((m) => ({ label: mesLabel(m), value: porMes.get(m) }));
+  const pontos = semanas.map((s) => ({ label: rotuloSemanaCurto(s), value: porSemana.get(s) || 0 }));
 
   const container = app.querySelector("#chart-mes");
   const tabelaBody = app.querySelector("#tabela-mes-body");
@@ -664,15 +705,14 @@ function desenharChartMes(app, lancamentosDim) {
     tabelaBody.appendChild(tr);
   });
 }
-function desenharChartUsoMensal(app, lancamentosDim) {
-  const porMes = new Map();
-  for (const l of lancamentosDim) {
-    const mes = (l.dataInicio || "").slice(0, 7);
-    if (!mes) continue;
-    porMes.set(mes, (porMes.get(mes) || 0) + l.quantidadeUso);
+function desenharChartUsoMensal(app, lancamentosPeriodo, semanas) {
+  const porSemana = new Map();
+  for (const l of lancamentosPeriodo) {
+    if (!l.dataInicio) continue;
+    const semana = chaveSemana(l.dataInicio);
+    porSemana.set(semana, (porSemana.get(semana) || 0) + l.quantidadeUso);
   }
-  const meses = [...porMes.keys()].sort();
-  const pontos = meses.map((m) => ({ label: mesLabel(m), value: porMes.get(m) }));
+  const pontos = semanas.map((s) => ({ label: rotuloSemanaCurto(s), value: porSemana.get(s) || 0 }));
 
   const container = app.querySelector("#chart-uso");
   if (!pontos.length) {
@@ -785,7 +825,7 @@ function wireLineChartHover(container, pontos, formatValue) {
 
 /* ---------- comparação (barras pareadas, 2 séries + linha sobreposta) ---------- */
 function compareColHtml(id, cupons, de, ate) {
-  const opts = cupons.map((lc) => `<option value="${esc(lc.chave)}">${esc(lc.cupom)} — ${esc(lc.parceiros.map((p) => p.nome).join(", "))}</option>`).join("");
+  const opts = cupons.map((lc) => `<option value="${esc(lc.chave)}" title="${esc(lc.cupom)} — ${esc(lc.parceiros.map((p) => p.nome).join(", "))}">${esc(lc.cupom)}</option>`).join("");
   return `<div class="compare-col">
     <div class="field"><label>Cupom</label><select class="input" id="cmp-${id}-cupom">${opts}</select></div>
     <div class="field-2col">

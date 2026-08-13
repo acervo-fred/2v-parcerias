@@ -62,17 +62,29 @@ export function calcularRotulo(tipo, dataInicio, dataFim) {
 }
 
 /* Remove duplicidade: quando o mesmo parceiro (cupom) tem dois ou mais
-   lançamentos com período SOBREPOSTO (ex.: um "01 a 10/jul" e depois um
-   "01 a 14/jul" que já inclui aquele mesmo início — relatório parcial e
-   completo do mesmo intervalo), mantém só o de maior valor (cupom +
-   total + uso somados) do grupo que se sobrepõe, descarta o resto.
-   Não exige data de início/fim idênticas — cobre também o caso comum de
-   um período mais curto contido dentro de um mais longo.
+   lançamentos com período SOBREPOSTO, mantém só um por grupo que se
+   sobrepõe, descarta o resto. Não exige data de início/fim idênticas —
+   cobre também o caso comum de um período mais curto contido dentro de
+   um mais longo (ex.: um lançamento de "terça-feira" sozinho dentro de
+   uma "semana" que também cobre aquele dia).
+
+   Critério de desempate:
+   1) período mais ESPECÍFICO (menor, em dias) vence — um lançamento de
+      um dia é mais confiável que uma semana que só por acaso o cobre;
+   2) em caso de empate no tamanho do período (ex.: dois lançamentos
+      "semana" sobrepostos — relatório parcial e completo do mesmo
+      intervalo), o de maior valor (cupom + total + uso somados) vence.
+
    Usado nas agregações (Dashboard, stats), nunca na listagem bruta da
    Base de Dados — lá o usuário precisa ver e poder excluir a duplicata
    manualmente se quiser. */
 export function dedupLancamentos(lista) {
   const peso = (l) => (l.faturamentoCupom || 0) + (l.faturamentoTotal || 0) + (l.quantidadeUso || 0);
+  const melhorEntre = (a, b) => {
+    const spanA = spanDias(a.dataInicio, a.dataFim), spanB = spanDias(b.dataInicio, b.dataFim);
+    if (spanA !== spanB) return spanA < spanB ? a : b;
+    return peso(b) > peso(a) ? b : a;
+  };
   const porParceiro = new Map();
   for (const l of lista) {
     if (!porParceiro.has(l.parceiroId)) porParceiro.set(l.parceiroId, []);
@@ -94,7 +106,7 @@ export function dedupLancamentos(lista) {
       }
     }
     for (const c of clusters) {
-      resultado.push(c.itens.reduce((melhor, l) => (peso(l) > peso(melhor) ? l : melhor)));
+      resultado.push(c.itens.reduce(melhorEntre));
     }
   }
   return resultado;
@@ -104,6 +116,46 @@ function diaSeguinte(iso) {
   const dt = parseISO(iso);
   dt.setDate(dt.getDate() + 1);
   return toISO(dt);
+}
+
+/* Duração de um intervalo em dias (fim - início) — usado pra saber qual
+   de dois lançamentos sobrepostos é mais "específico" (menor). */
+function spanDias(inicio, fim) {
+  if (!inicio) return Infinity;
+  return Math.round((parseISO(fim || inicio) - parseISO(inicio)) / 86400000);
+}
+
+/* ============================================================
+   Semana da plataforma: sempre segunda a domingo (nunca domingo a
+   sábado) — usado em presets de período, agrupamento de gráficos e
+   no calendário da Base de Dados. Única fonte de verdade pra essa
+   convenção; qualquer tela que precise de "semana" importa daqui em
+   vez de calcular com getDay() na mão.
+   ============================================================ */
+
+/* Segunda-feira (ISO) da semana que contém `dt` (Date, padrão hoje). */
+export function inicioSemanaISO(dt = new Date()) {
+  const d = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
+  const diaSemana = d.getDay(); // 0=dom..6=sáb
+  d.setDate(d.getDate() - (diaSemana === 0 ? 6 : diaSemana - 1));
+  return toISO(d);
+}
+/* Domingo (ISO) da semana que contém `dt`. */
+export function fimSemanaISO(dt = new Date()) {
+  const d = parseISO(inicioSemanaISO(dt));
+  d.setDate(d.getDate() + 6);
+  return toISO(d);
+}
+/* Segunda-feira (ISO) da semana à qual uma data ISO qualquer pertence
+   — chave de agrupamento pros gráficos "por semana". */
+export function chaveSemana(iso) {
+  return inicioSemanaISO(parseISO(iso));
+}
+const MES_ABREV_CURTO = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+/* Rótulo curto pro eixo dos gráficos: "23/jun". */
+export function rotuloSemanaCurto(iniISO) {
+  const [, m, d] = iniISO.split("-");
+  return `${d}/${MES_ABREV_CURTO[parseInt(m, 10) - 1]}`;
 }
 
 /* Pra cada dia do mês/ano pedidos, diz se algum lançamento cobre esse
@@ -166,6 +218,15 @@ export function statusDiasDoMes(lancamentos, ano, mes) {
    desse padrão (datas de início diferentes, período igual ou mais
    curto) é ambígua demais pra resolver sozinho — devolve o motivo pra
    quem chamou decidir (normalmente bloqueando o formulário).
+
+   Exceção: se o novo período é mais ESPECÍFICO (menor, em dias) que
+   TODOS os lançamentos com quem se sobrepõe — ex.: lançar um dia
+   específico dentro de uma semana já lançada —, não tem como calcular
+   delta (não é uma continuação cumulativa do mesmo relatório) nem faz
+   sentido bloquear: deixa os dois coexistirem como registros
+   independentes. dedupLancamentos (acima) resolve isso na hora de
+   agregar, sempre priorizando o mais específico.
+
    faturamentoTotal não entra nessa conta — não é mais coletado por
    cupom no lançamento avulso/lote (ver abrirFaturamentoLoja). */
 export function calcularEntradaLancamento(existentesDoParceiro, novo) {
@@ -176,6 +237,12 @@ export function calcularEntradaLancamento(existentesDoParceiro, novo) {
   });
 
   if (sobrepostos.length === 0) {
+    return { tipo: "novo", dataInicio: novo.dataInicio, dataFim: fimNovo, quantidadeUso: novo.quantidadeUso, faturamentoCupom: novo.faturamentoCupom };
+  }
+
+  const spanNovo = spanDias(novo.dataInicio, fimNovo);
+  const maisEspecificoQueTodos = sobrepostos.every((l) => spanDias(l.dataInicio, l.dataFim) > spanNovo);
+  if (maisEspecificoQueTodos) {
     return { tipo: "novo", dataInicio: novo.dataInicio, dataFim: fimNovo, quantidadeUso: novo.quantidadeUso, faturamentoCupom: novo.faturamentoCupom };
   }
 

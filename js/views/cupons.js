@@ -14,7 +14,7 @@
 
 import { store } from "../data/store.js";
 import { esc, formatMoeda, formatDataBR } from "../ui/dom.js";
-import { dedupLancamentos, lancamentoNoPeriodo } from "../util/periodo.js";
+import { dedupLancamentos, lancamentoNoPeriodo, inicioSemanaISO, fimSemanaISO } from "../util/periodo.js";
 import { agruparParceirosPorCupom, chaveCupom, descontoAtual } from "../util/cupom.js";
 import { usuarioAtual } from "../data/auth.js";
 import { openModal, fieldText, readValue } from "../ui/modal.js";
@@ -98,7 +98,7 @@ export async function renderCupons(app) {
   const chavePorParceiroId = Object.fromEntries(parceiros.map((p) => [p.id, chaveCupom(p)]));
   const linhasPorChave = new Map(linhasCupom.map((lc) => [lc.chave, lc]));
 
-  let periodo = "total"; // "mes" | "total"
+  let periodo = "total"; // "semana" | "semanapassada" | "mes" | "total"
   let aba = "todos"; // "todos" | "1".."4"
   let busca = "";
   const ordem = { chave: "cupom", dir: "asc" };
@@ -110,6 +110,8 @@ export async function renderCupons(app) {
         <div class="page-sub">${linhasCupom.length} cupons · 20% padrão ou 50% no período especial de cada grupo</div>
       </div>
       <div class="filter-row" id="periodo-cupons" style="margin-bottom:0">
+        <button class="chip" data-p="semana">Esta semana</button>
+        <button class="chip" data-p="semanapassada">Semana passada</button>
         <button class="chip" data-p="mes">Último mês</button>
         <button class="chip active" data-p="total">Total</button>
       </div>
@@ -142,13 +144,24 @@ export async function renderCupons(app) {
         <tbody id="lista-cupons"></tbody>
       </table>
     </div>
+
+    <div class="viz-tooltip" id="viz-tip-cupons" role="tooltip"></div>
   `;
 
   const painel = app.querySelector("#grupo-painel");
   const lista = app.querySelector("#lista-cupons");
 
   function periodoAtual() {
-    return periodo === "mes" ? [isoMenosDias(30), hojeISO()] : ["", ""];
+    if (periodo === "semana") {
+      const hoje = new Date();
+      return [inicioSemanaISO(hoje), fimSemanaISO(hoje)];
+    }
+    if (periodo === "semanapassada") {
+      const ref = new Date(); ref.setDate(ref.getDate() - 7);
+      return [inicioSemanaISO(ref), fimSemanaISO(ref)];
+    }
+    if (periodo === "mes") return [isoMenosDias(30), hojeISO()];
+    return ["", ""]; // total
   }
 
   function desenharPainel() {
@@ -224,6 +237,38 @@ export async function renderCupons(app) {
       th.classList.toggle("sort-active", th.dataset.sort === ordem.chave);
       th.dataset.sortDir = th.dataset.sort === ordem.chave ? ordem.dir : "";
     });
+
+    wireTooltipCupons();
+  }
+
+  /* Ao passar o mouse (ou focar, via teclado) no nome do cupom, mostra
+     um mini menu com empresa + responsável de cada parceiro daquele
+     cupom — útil quando o cupom é compartilhado por mais de uma
+     empresa. Reaproveita o mesmo componente visual dos gráficos do
+     Dashboard (.viz-tooltip). */
+  function wireTooltipCupons() {
+    const tip = app.querySelector("#viz-tip-cupons");
+    lista.querySelectorAll(".cupom-nome-hover").forEach((el) => {
+      const lc = linhasPorChave.get(el.dataset.chave);
+      if (!lc) return;
+      function mostrar() {
+        tip.innerHTML = "";
+        lc.parceiros.forEach((p) => {
+          const linha = document.createElement("div");
+          linha.textContent = p.responsavel ? `${p.nome} — ${p.responsavel}` : p.nome;
+          tip.appendChild(linha);
+        });
+        const r = el.getBoundingClientRect();
+        tip.style.left = `${r.left + r.width / 2}px`;
+        tip.style.top = `${r.top}px`;
+        tip.classList.add("show");
+      }
+      function esconder() { tip.classList.remove("show"); }
+      el.addEventListener("mouseenter", mostrar);
+      el.addEventListener("mouseleave", esconder);
+      el.addEventListener("focus", mostrar);
+      el.addEventListener("blur", esconder);
+    });
   }
 
   function fmtPeriodo(per) {
@@ -237,7 +282,7 @@ export async function renderCupons(app) {
     const empresas = lc.parceiros.map((p) => p.nome).join(", ");
     return `<tr class="rank-row">
       <td>
-        <strong>${esc(lc.cupom)}</strong>
+        <strong class="cupom-nome-hover" data-chave="${esc(lc.chave)}" tabindex="0">${esc(lc.cupom)}</strong>
         ${lc.parceiros.length > 1 ? `<div class="muted" style="font-size:11.5px">${esc(empresas)}</div>` : ""}
       </td>
       <td class="num">${uso}</td>
