@@ -89,6 +89,21 @@ export const firestoreStore = {
     const ref = await addDoc(collection(fdb, COLLECTIONS.lojas), novo);
     return { id: ref.id, ...novo };
   },
+  // apaga a loja e cascateia tudo que é dela (mesmo padrão de
+  // removeParceiro cascateando lançamentos) — parceiros, lançamentos,
+  // grupos de cupom, partners (CRM) e tasks "Geral"
+  async removeLoja(id) {
+    const colecoesDaLoja = [
+      COLLECTIONS.parceiros, COLLECTIONS.lancamentos, COLLECTIONS.grupos,
+      COLLECTIONS.partners, COLLECTIONS.tasks,
+    ];
+    for (const colecao of colecoesDaLoja) {
+      const docs = await docsWhere(colecao, "lojaId", id);
+      await Promise.all(docs.map((d) => deleteDoc(doc(fdb, colecao, d.id))));
+    }
+    await deleteDoc(doc(fdb, COLLECTIONS.lojas, id));
+    return true;
+  },
 
   /* ---------- grupos de cupons ---------- */
   async listGrupos() {
@@ -225,6 +240,26 @@ export const firestoreStore = {
     const snap = await getDoc(doc(fdb, COLLECTIONS.partners, id));
     return snap.exists() ? { id: snap.id, ...snap.data() } : null;
   },
+  // cria um partner com ID escolhido por quem chama (não gerado pelo
+  // Firestore) — pra poder compartilhar o mesmo id do parceiros/{id}
+  // correspondente, mesmo padrão que a migração da Fase 1 já usa
+  // (js/migracao/transformar.js). Ver js/views/cadastros.js:abrirFecharParceria
+  // e js/views/kanban.js (drop de um card de "Lead" pra outro estágio).
+  async addPartner(id, dados) {
+    const lojaId = await lojaAtualIdOuErro();
+    const autor = usuarioAtual()?.email || "desconhecido";
+    const agora = hojeISO();
+    const novo = {
+      lojaId,
+      name: dados.name || "", type: dados.type || "", area: dados.area || "",
+      address: dados.address || "", contact: dados.contact || {}, contactRaw: dados.contactRaw || "",
+      responsavel: dados.responsavel || "", stage: dados.stage || "ativo",
+      stageUpdatedAt: agora, nextAction: dados.nextAction ?? null, tags: [], archived: false,
+      createdAt: agora, createdBy: autor, updatedAt: agora, updatedBy: autor,
+    };
+    await setDoc(doc(fdb, COLLECTIONS.partners, id), novo);
+    return { id, ...novo };
+  },
   async updatePartner(id, campos) {
     const stamped = { ...campos, updatedAt: hojeISO(), updatedBy: usuarioAtual()?.email || "desconhecido" };
     await updateDoc(doc(fdb, COLLECTIONS.partners, id), stamped);
@@ -262,6 +297,31 @@ export const firestoreStore = {
   async getCoupon(id) {
     const snap = await getDoc(doc(fdb, COLLECTIONS.coupons, id));
     return snap.exists() ? { id: snap.id, ...snap.data() } : null;
+  },
+
+  /* ---------- TASKS (ações "Geral" — ligadas só à loja, sem negócio) ---------- */
+  async listTasksGerais() {
+    const lojaId = await lojaAtualIdOuErro();
+    return docsWhere(COLLECTIONS.tasks, "lojaId", lojaId);
+  },
+  // sem filtro de loja — só pro mapa consolidado da aba Equipe
+  async listTasksTodasLojas() { return allDocs(COLLECTIONS.tasks); },
+  async addTaskGeral(dados) {
+    const lojaId = await lojaAtualIdOuErro();
+    const novo = {
+      lojaId, description: dados.description || "", dueDate: dados.dueDate || "",
+      dataInicio: dados.dataInicio || "", responsavel: dados.responsavel || "", concluidaEm: null,
+    };
+    const ref = await addDoc(collection(fdb, COLLECTIONS.tasks), novo);
+    return { id: ref.id, ...novo };
+  },
+  async updateTaskGeral(id, campos) {
+    await updateDoc(doc(fdb, COLLECTIONS.tasks, id), campos);
+    return { id, ...campos };
+  },
+  async removeTaskGeral(id) {
+    await deleteDoc(doc(fdb, COLLECTIONS.tasks, id));
+    return true;
   },
 
   /* ---------- BACKUP ---------- */

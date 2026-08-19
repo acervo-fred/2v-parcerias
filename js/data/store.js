@@ -122,6 +122,7 @@ const localStore = {
     persistir();
     return structuredClone(novo);
   },
+  async removeLoja() { throw new Error("Excluir loja ainda não está disponível no modo local (sem Firestore)."); },
 
   /* ---------- grupos de cupons ---------- */
   async listGrupos() {
@@ -137,6 +138,7 @@ const localStore = {
   },
   async updateGrupo(id, campos) { return atualizar(db.grupos, id, campos); },
   async removeGrupo(id) { return remover(db.grupos, id); },
+
 
   /* ---------- listas de configuração ---------- */
   async getListas() { return structuredClone(db.listas); },
@@ -262,6 +264,7 @@ const localStore = {
   /* ---------- CRM (Fase 2/3 — só existe no backend Firestore, ver firestore.js) ---------- */
   async listPartners() { throw new Error("Este recurso do novo CRM ainda não está disponível no modo local (sem Firestore)."); },
   async getPartner() { throw new Error("Este recurso do novo CRM ainda não está disponível no modo local (sem Firestore)."); },
+  async addPartner() { throw new Error("Este recurso do novo CRM ainda não está disponível no modo local (sem Firestore)."); },
   async updatePartner() { throw new Error("Este recurso do novo CRM ainda não está disponível no modo local (sem Firestore)."); },
   async removePartner() { throw new Error("Este recurso do novo CRM ainda não está disponível no modo local (sem Firestore)."); },
   async interactionsDoPartner() { throw new Error("Este recurso do novo CRM ainda não está disponível no modo local (sem Firestore)."); },
@@ -271,6 +274,11 @@ const localStore = {
   async getCampaign() { throw new Error("Este recurso do novo CRM ainda não está disponível no modo local (sem Firestore)."); },
   async couponPartnersDoPartner() { throw new Error("Este recurso do novo CRM ainda não está disponível no modo local (sem Firestore)."); },
   async getCoupon() { throw new Error("Este recurso do novo CRM ainda não está disponível no modo local (sem Firestore)."); },
+  async listTasksGerais() { throw new Error("Este recurso do novo CRM ainda não está disponível no modo local (sem Firestore)."); },
+  async listTasksTodasLojas() { throw new Error("Este recurso do novo CRM ainda não está disponível no modo local (sem Firestore)."); },
+  async addTaskGeral() { throw new Error("Este recurso do novo CRM ainda não está disponível no modo local (sem Firestore)."); },
+  async updateTaskGeral() { throw new Error("Este recurso do novo CRM ainda não está disponível no modo local (sem Firestore)."); },
+  async removeTaskGeral() { throw new Error("Este recurso do novo CRM ainda não está disponível no modo local (sem Firestore)."); },
 
   /* ---------- BACKUP ---------- */
   async exportAll() {

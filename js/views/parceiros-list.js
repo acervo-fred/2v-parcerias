@@ -4,16 +4,20 @@
 import { store } from "../data/store.js";
 import { esc } from "../ui/dom.js";
 import { badgeFromLista } from "../ui/badges.js";
-import { validadeCupomTexto } from "../util/cupom.js";
+import { validadeCupomTexto, cupomEm50, chaveCupom, statusCupomEfetivo } from "../util/cupom.js";
 import { openModal, fieldText, fieldTextarea, readValue } from "../ui/modal.js";
-import { abrirNovoParceiro } from "./cadastros.js";
+import { fieldResponsavel, wireResponsavelField, readResponsavel } from "../ui/campo-responsavel.js";
+import { abrirNovoParceiro, abrirEditarParceiro } from "./cadastros.js";
+import { adicionarAcao, garantirPartner, criarAcao } from "../data/funil.js";
 
 export async function renderParceiros(app) {
-  const [parceiros, listas, grupos] = await Promise.all([
+  const [parceiros, listas, grupos, partners] = await Promise.all([
     store.listParceirosFechados(),
     store.getListas(),
     store.listGrupos(),
+    store.listPartners(),
   ]);
+  const partnersById = Object.fromEntries(partners.map((p) => [p.id, p]));
 
   let busca = "";
   let filtroStatus = "Todos";
@@ -59,7 +63,7 @@ export async function renderParceiros(app) {
         || p.nome.toLowerCase().includes(termo)
         || (p.cupom || "").toLowerCase().includes(termo)
         || (p.responsavel || "").toLowerCase().includes(termo);
-      const okStatus = filtroStatus === "Todos" || p.statusCupom === filtroStatus;
+      const okStatus = filtroStatus === "Todos" || statusCupomEfetivo(p) === filtroStatus;
       return okBusca && okStatus;
     }).sort((a, b) => ordem === "cupom"
       ? (a.cupom || "").localeCompare(b.cupom || "", "pt-BR")
@@ -87,7 +91,7 @@ export async function renderParceiros(app) {
       if (!selecionados.size) { alert("Selecione ao menos um parceiro."); return; }
       const ids = [...selecionados];
       const porId = Object.fromEntries(parceiros.map((p) => [p.id, p]));
-      abrirProximaAcaoEmLote(ids, porId, () => { selecionados.clear(); desenhar(); });
+      abrirProximaAcaoEmLote(ids, porId, partnersById, () => { selecionados.clear(); desenhar(); });
     }
   });
 
@@ -98,8 +102,26 @@ export async function renderParceiros(app) {
     else selecionados.delete(cb.dataset.id);
   });
 
-  lista.addEventListener("click", (e) => {
+  lista.addEventListener("click", async (e) => {
     if (e.target.closest(".row-select")) return;
+    if (e.target.closest("[data-action='editar']")) {
+      const row = e.target.closest("[data-id]");
+      const p = parceiros.find((x) => x.id === row?.dataset.id);
+      if (p) abrirEditarParceiro(p);
+      return;
+    }
+    if (e.target.closest("[data-action='pausar']")) {
+      const row = e.target.closest("[data-id]");
+      const p = parceiros.find((x) => x.id === row?.dataset.id);
+      if (!p) return;
+      const novoStatus = statusCupomEfetivo(p) === "Pausado" ? "Ativo" : "Pausado";
+      // pausa/reativa todo mundo que compartilha o mesmo código de cupom,
+      // mesmo padrão de "cuponsIrmaos" já usado em ficha-parceiro.js
+      const irmaos = parceiros.filter((x) => chaveCupom(x) === chaveCupom(p));
+      await Promise.all(irmaos.map((x) => store.updateParceiro(x.id, { statusCupom: novoStatus })));
+      window.dispatchEvent(new CustomEvent("data-changed"));
+      return;
+    }
     const row = e.target.closest("[data-id]");
     if (row) location.hash = `#/parceiro/${row.dataset.id}`;
   });
@@ -107,18 +129,23 @@ export async function renderParceiros(app) {
 
 function row(p, listas, grupos, selecionados) {
   const contatoValidade = [p.contato, validadeCupomTexto(p, grupos)].filter(Boolean).join(" · ");
+  const statusEfetivo = statusCupomEfetivo(p);
+  const pausado = statusEfetivo === "Pausado";
+  const classesCupom = [cupomEm50(p, grupos) ? "cupom-codigo--50" : "", pausado ? "cupom-pausado" : ""].filter(Boolean).join(" ");
   return `<div class="list-row clickable" data-id="${esc(p.id)}">
     <input type="checkbox" class="row-select edit-only" data-id="${esc(p.id)}" ${selecionados.has(p.id) ? "checked" : ""} />
     <div class="lr-main">
-      <div class="lr-title lr-title-normal"><strong>${esc((p.cupom || "").toUpperCase())}</strong> ${esc(p.nome)}${p.responsavel ? ` — ${esc(p.responsavel)}` : ""}</div>
+      <div class="lr-title lr-title-normal"><strong${classesCupom ? ` class="${classesCupom}"` : ""}>${esc((p.cupom || "").toUpperCase())}</strong> ${esc(p.nome)}${p.responsavel ? ` — ${esc(p.responsavel)}` : ""}</div>
       <div class="lr-sub">${esc(contatoValidade)}</div>
     </div>
-    ${badgeFromLista(listas.statusCupom, p.statusCupom)}
+    ${badgeFromLista(listas.statusCupom, statusEfetivo)}
+    <button class="btn btn-sm btn-ghost edit-only" data-action="pausar" title="${pausado ? "Reativar cupom" : "Pausar cupom"}">${pausado ? "Reativar cupom" : "Pausar cupom"}</button>
+    <button class="icon-btn edit-only" data-action="editar" title="Editar">✎</button>
     <span class="muted">›</span>
   </div>`;
 }
 
-async function abrirProximaAcaoEmLote(ids, porId, aoTerminar) {
+async function abrirProximaAcaoEmLote(ids, porId, partnersById, aoTerminar) {
   const nomes = ids.map((id) => porId[id]?.nome).filter(Boolean);
   openModal({
     title: "Definir próxima ação",
@@ -126,15 +153,24 @@ async function abrirProximaAcaoEmLote(ids, porId, aoTerminar) {
     submitLabel: "Salvar",
     bodyHtml: `
       ${fieldTextarea("description", "Descrição", { required: true, placeholder: "Ex.: Ligar pra confirmar renovação do cupom" })}
-      ${fieldText("dueDate", "Data", { type: "date", required: true })}
+      <div class="field-2col">
+        ${fieldText("dataInicio", "Início (opcional)", { type: "date" })}
+        ${fieldText("dueDate", "Prazo", { type: "date", required: true })}
+      </div>
+      ${fieldResponsavel()}
     `,
+    onMount: wireResponsavelField,
     onSubmit: async (form) => {
       const description = readValue(form, "description");
       const dueDate = readValue(form, "dueDate");
+      const dataInicio = readValue(form, "dataInicio") || new Date().toISOString().slice(0, 10);
+      const responsavel = readResponsavel(form);
       if (!description) throw new Error("Descreva a próxima ação.");
-      if (!dueDate) throw new Error("Informe a data da próxima ação.");
+      if (!dueDate) throw new Error("Informe o prazo da próxima ação.");
       const resultados = await Promise.allSettled(
-        ids.map((id) => store.updatePartner(id, { nextAction: { description, dueDate } }))
+        ids.map((id) => partnersById[id]
+          ? adicionarAcao(id, partnersById[id], { description, dueDate, dataInicio, responsavel })
+          : garantirPartner(id, porId[id], partnersById, { nextActions: [criarAcao({ description, dueDate, dataInicio, responsavel })] }))
       );
       const falhas = resultados
         .map((r, i) => (r.status === "rejected" ? porId[ids[i]]?.nome || ids[i] : null))

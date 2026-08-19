@@ -6,6 +6,8 @@
 import { store } from "../data/store.js";
 import { USE_FIRESTORE } from "../config/firebase-config.js";
 import * as mock from "../data/mock.js";
+import { esc } from "../ui/dom.js";
+import { getLojaAtualId, setLojaAtualId } from "../data/loja-atual.js";
 
 const LS_KEY = "2v-parcerias-db-v1";
 
@@ -24,6 +26,7 @@ function baixarJSON(obj, nome) {
 
 export async function renderBackup(app) {
   const backend = USE_FIRESTORE ? "Firestore (nuvem)" : "Local (neste navegador)";
+  const lojas = await store.listLojas();
 
   app.innerHTML = `
     <a class="back-link" href="#/">← Voltar</a>
@@ -59,6 +62,22 @@ export async function renderBackup(app) {
         <p class="muted" style="margin-top:0;font-size:13.5px">Grava o conjunto de dados atual (o já importado da planilha) no backend ativo. Sobrescreve itens de mesmo ID.</p>
         <button class="btn" id="btn-seed">Popular com dados atuais</button>
         <div id="seed-status" class="muted" style="font-size:13px;margin-top:8px"></div>
+      </div>
+
+      <div class="chart-card edit-only" style="border-color:var(--c-red-fg)">
+        <h3 style="margin-bottom:10px">Excluir loja</h3>
+        <p class="muted" style="margin-top:0;font-size:13.5px">Apaga uma loja inteira: parceiros, cupons, lançamentos e andamento no Pipeline. Não dá pra desfazer.</p>
+        <div class="field" style="margin-bottom:10px">
+          <select class="input" id="del-loja-select">
+            ${lojas.map((l) => `<option value="${esc(l.id)}">${esc(l.nome)}</option>`).join("")}
+          </select>
+        </div>
+        <div class="field" style="margin-bottom:10px">
+          <label for="del-loja-confirma" style="font-size:13px">Digite o nome da loja pra confirmar</label>
+          <input class="input" id="del-loja-confirma" type="text" autocomplete="off" />
+        </div>
+        <button class="btn btn-danger" id="btn-del-loja" disabled>🗑 Excluir esta loja</button>
+        <div id="del-loja-status" class="muted" style="font-size:13px;margin-top:8px"></div>
       </div>
     </div>
   `;
@@ -114,6 +133,37 @@ export async function renderBackup(app) {
       setTimeout(() => { location.hash = "#/"; location.reload(); }, 600);
     } catch (err) {
       seedStatus.textContent = "✗ Erro: " + err.message;
+    }
+  });
+
+  const delSelect = app.querySelector("#del-loja-select");
+  const delConfirma = app.querySelector("#del-loja-confirma");
+  const delBtn = app.querySelector("#btn-del-loja");
+  const delStatus = app.querySelector("#del-loja-status");
+  function nomeSelecionado() {
+    return lojas.find((l) => l.id === delSelect.value)?.nome || "";
+  }
+  function atualizarBotao() {
+    delBtn.disabled = delConfirma.value.trim() !== nomeSelecionado();
+  }
+  delSelect.addEventListener("change", () => { delConfirma.value = ""; atualizarBotao(); });
+  delConfirma.addEventListener("input", atualizarBotao);
+  delBtn.addEventListener("click", async () => {
+    const id = delSelect.value;
+    const nome = nomeSelecionado();
+    if (delConfirma.value.trim() !== nome) return;
+    if (!confirm(`Excluir a loja "${nome}"? Isso apaga TODOS os parceiros, cupons e lançamentos dela. Não dá pra desfazer.`)) return;
+    delStatus.textContent = "Excluindo…";
+    try {
+      await store.removeLoja(id);
+      if (getLojaAtualId() === id) {
+        const restante = lojas.find((l) => l.id !== id);
+        setLojaAtualId(restante ? restante.id : "");
+      }
+      delStatus.textContent = "✓ Loja excluída. Recarregando…";
+      setTimeout(() => { location.hash = "#/"; location.reload(); }, 600);
+    } catch (err) {
+      delStatus.textContent = "✗ Erro: " + err.message;
     }
   });
 }

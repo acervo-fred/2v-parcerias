@@ -41,7 +41,6 @@ export const listas = {
   statusCupom: [
     { valor: "Ativo", cor: "green" },
     { valor: "Pausado", cor: "amber" },
-    { valor: "Encerrado", cor: "gray" },
   ],
 };
 

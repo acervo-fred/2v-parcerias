@@ -145,6 +145,20 @@ button { font: inherit; }
 .side-nav a.active { background: rgba(255,255,255,0.18); color: #fff; }
 .ni-ic { display: inline-flex; align-items: center; justify-content: center; width: 18px; flex-shrink: 0; opacity: 0.9; }
 
+/* Sub-lista que expande sob um item da sidebar (ex.: Parceiros → Prospecção/
+   Leads/Parceiros Ativos) — aberta/fechada conforme a rota atual, ver
+   atualizarNavParceiros() em app.js, não por clique manual. */
+.side-nav-sub { display: none; flex-direction: column; gap: 2px; padding: 2px 0 4px 26px; }
+.side-nav-sub.open { display: flex; }
+.side-nav-sub a {
+  display: flex; align-items: center;
+  padding: 8px 12px; border-radius: var(--r-sm);
+  color: rgba(255,255,255,0.65); font-weight: 600; font-size: 13px;
+  transition: background 0.12s, color 0.12s;
+}
+.side-nav-sub a:hover { background: rgba(255,255,255,0.10); color: #fff; }
+.side-nav-sub a.active { background: rgba(255,255,255,0.18); color: #fff; }
+
 .main { flex: 1; min-width: 0; }
 .topbar {
   display: flex; align-items: center; justify-content: flex-end;
@@ -152,6 +166,14 @@ button { font: inherit; }
   border-bottom: 1px solid var(--border);
   background: var(--surface);
 }
+.topbar-link {
+  margin-right: auto;
+  font-weight: 700; font-size: 14px; color: var(--accent-dark);
+  padding: 6px 10px; border-radius: var(--r-sm);
+  transition: background 0.12s;
+}
+.topbar-link:hover { background: var(--accent-soft); }
+.topbar-link.active { background: var(--accent-soft); }
 #app { padding: 24px 32px 60px; max-width: 1300px; margin: 0 auto; }
 
 /* ================= TIPOGRAFIA DE PÁGINA ================= */
@@ -179,6 +201,13 @@ button { font: inherit; }
 .btn-ghost { background: transparent; border-color: transparent; color: var(--text-soft); }
 .btn-ghost:hover { background: var(--surface-2); color: var(--text); border-color: var(--border); }
 .btn-danger { color: var(--c-red-fg); }
+.btn-link {
+  background: none; border: none; padding: 0; cursor: pointer;
+  color: var(--accent-dark); font-weight: 600; font-size: inherit;
+  text-decoration: underline; text-underline-offset: 2px;
+}
+.btn-link:hover { opacity: 0.75; }
+.btn-link-danger { color: var(--c-red-fg); }
 .btn-danger:hover { background: var(--c-red-bg); border-color: var(--c-red-fg); }
 .btn-sm { padding: 5px 12px; font-size: 12px; }
 .icon-btn {
@@ -227,6 +256,32 @@ button { font: inherit; }
 }
 .chip:hover { background: var(--surface-2); }
 .chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.chip-sm { padding: 4px 10px; font-size: 11px; }
+.chip:disabled { opacity: 0.45; cursor: not-allowed; }
+.chip:disabled:hover { background: var(--surface); }
+
+/* ================= FUNIL HORIZONTAL COM PROGRESSO (Pipeline) ================= */
+.funil-progresso { display: flex; align-items: flex-start; gap: 6px; margin-bottom: 26px; }
+.fp-seta { flex: 0 0 auto; color: var(--text-faint); font-size: 20px; padding-top: 26px; }
+.fp-no { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; text-align: center; }
+.fp-icone {
+  width: 64px; height: 64px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  margin-bottom: 10px;
+}
+.fp-icone--teal  { background: var(--c-teal-bg);  color: var(--c-teal-fg); }
+.fp-icone--amber { background: var(--c-amber-bg); color: var(--c-amber-fg); }
+.fp-icone--green { background: var(--c-green-bg); color: var(--c-green-fg); }
+.fp-icone--red   { background: var(--c-red-bg);   color: var(--c-red-fg); }
+.fp-label { font-size: 11px; font-weight: 800; letter-spacing: 0.4px; margin-bottom: 2px; }
+.fp-label--teal  { color: var(--c-teal-fg); }
+.fp-label--amber { color: var(--c-amber-fg); }
+.fp-label--green { color: var(--c-green-fg); }
+.fp-label--red   { color: var(--c-red-fg); }
+.fp-numero { font-family: var(--font-display); font-size: 26px; }
+.fp-numero--teal  { color: var(--c-teal-fg); }
+.fp-numero--amber { color: var(--c-amber-fg); }
+.fp-numero--green { color: var(--c-green-fg); }
+.fp-numero--red   { color: var(--c-red-fg); }
 
 /* ================= FUNIL (Kanban) ================= */
 .funil-board { display: flex; gap: 14px; overflow-x: auto; padding-bottom: 8px; }
@@ -266,6 +321,94 @@ button { font: inherit; }
 }
 .acoes-data-label--soon { color: var(--c-amber-fg); }
 .acoes-data-label--overdue { color: var(--c-red-fg); }
+
+.acoes-responsavel-label {
+  font-family: var(--font-display); font-size: 15px; font-weight: 400;
+  color: var(--accent-dark); margin: 18px 0 8px;
+}
+.acoes-responsavel-label:first-child { margin-top: 0; }
+
+/* ================= PRÓXIMOS PASSOS (lista + calendário-agenda) ================= */
+.pp-cor-dot {
+  display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+  vertical-align: middle; margin-right: 2px; margin-bottom: 2px;
+}
+.pp-cor-dot--blue   { background: var(--c-blue-fg); }
+.pp-cor-dot--green  { background: var(--c-green-fg); }
+.pp-cor-dot--violet { background: var(--c-violet-fg); }
+.pp-cor-dot--gray   { background: var(--c-gray-fg); }
+
+.pp-legenda { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+.pp-legenda-item { font-size: 12.5px; color: var(--text-soft); display: inline-flex; align-items: center; gap: 5px; }
+
+.pp-cal-row { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+.pp-cal-dow { font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--text-faint); margin-bottom: 4px; }
+.pp-cal-week { margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+.pp-cal-week:last-child { border-bottom: none; }
+.pp-cal-daynum {
+  font-size: 12px; font-weight: 700; color: var(--text-soft);
+  text-align: center; padding: 2px 0 4px;
+}
+.pp-cal-daynum--fora { color: var(--text-faint); opacity: 0.5; }
+.pp-cal-daynum--hoje { color: var(--accent-dark); box-shadow: inset 0 -2px 0 var(--accent-dark); }
+.pp-cal-lane { margin-top: 3px; }
+.pp-bar {
+  font-size: 11.5px; font-weight: 600; padding: 3px 7px; border-radius: var(--r-sm);
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis; cursor: default;
+}
+.pp-bar--blue   { background: var(--c-blue-bg);   color: var(--c-blue-fg); }
+.pp-bar--green  { background: var(--c-green-bg);  color: var(--c-green-fg); }
+.pp-bar--violet { background: var(--c-violet-bg); color: var(--c-violet-fg); }
+.pp-bar--gray   { background: var(--c-gray-bg);   color: var(--c-gray-fg); }
+
+/* ================= MAPA DA EQUIPE (aba Equipe) ================= */
+.mapa-equipe { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 20px; overflow-x: auto; }
+.mapa-cabecalho { display: flex; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+.mapa-cabecalho-label { width: 160px; flex-shrink: 0; }
+.mapa-cabecalho-meses { flex: 1; display: grid; gap: 4px; min-width: 480px; }
+.mapa-mes { font-size: 11px; font-weight: 800; letter-spacing: 0.4px; text-transform: uppercase; color: var(--text-faint); text-align: center; }
+
+.mapa-loja { padding: 14px 0; border-bottom: 1px solid var(--border); }
+.mapa-loja:last-of-type { border-bottom: none; }
+.mapa-loja-nome { font-family: var(--font-display); font-size: 17px; color: var(--accent-dark); margin-bottom: 8px; }
+.mapa-loja--crm { margin-top: 4px; }
+.mapa-loja--crm .mapa-loja-nome { color: var(--c-violet-fg); }
+.mapa-vazio { font-size: 12.5px; padding: 4px 0 4px 160px; }
+
+.mapa-sub-linha { display: flex; align-items: flex-start; margin-bottom: 6px; }
+.mapa-sub-linha:last-child { margin-bottom: 0; }
+.mapa-sub-nome {
+  width: 160px; flex-shrink: 0; font-size: 12.5px; font-weight: 700; color: var(--text-soft);
+  padding-top: 4px;
+}
+.mapa-sub-pistas { flex: 1; min-width: 480px; }
+.mapa-pista { display: grid; gap: 4px; margin-bottom: 4px; }
+.mapa-pista:last-child { margin-bottom: 0; }
+
+.mapa-bar {
+  font-size: 11.5px; font-weight: 600; padding: 6px 10px; border-radius: var(--r-sm);
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis; cursor: pointer;
+  transition: filter 0.12s;
+}
+.mapa-bar:hover { filter: brightness(0.95); }
+.mapa-bar--crm { background: var(--c-violet-bg); color: var(--c-violet-fg); cursor: default; font-weight: 700; text-align: center; }
+.mapa-bar--crm:hover { filter: none; }
+
+/* linha de ação (js/ui/acao-row.js) — checkbox vazio, só mostra o "feito"
+   (verde) no hover, pra não parecer que já tá concluída antes do clique */
+.pp-check {
+  width: 20px; height: 20px; border-radius: 5px; flex-shrink: 0;
+  border: 2px solid var(--border-strong); background: transparent;
+  cursor: pointer; padding: 0; position: relative;
+}
+.pp-check:hover { border-color: var(--c-green-fg); background: var(--c-green-bg); }
+.pp-check:hover::after {
+  content: "✓"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  color: var(--c-green-fg); font-size: 13px; font-weight: 800; line-height: 1;
+}
+.acao-concluida { text-decoration: line-through; color: var(--text-faint); }
+.acao-row--soon .lr-sub { color: var(--c-amber-fg); }
+.acao-row--overdue .lr-sub { color: var(--c-red-fg); }
 
 /* ================= CARDS / LISTAS ================= */
 .section { margin-bottom: 30px; }
@@ -325,6 +468,7 @@ button { font: inherit; }
 .cal-dia--vazio { background: var(--surface-2); }
 .cal-dia--ok { background: var(--c-green-bg); color: var(--c-green-fg); font-weight: 800; }
 .cal-dia--sobreposto { background: var(--c-amber-bg); color: var(--c-amber-fg); font-weight: 800; }
+.cal-dia--hoje { box-shadow: inset 0 0 0 2px var(--accent-dark); }
 
 .next-action {
   display: flex; align-items: center; justify-content: space-between; gap: 16px;
@@ -357,6 +501,19 @@ button { font: inherit; }
 
 .cupom-desconto--20 { background: var(--c-gray-bg);  color: var(--c-gray-fg);  font-weight: 800; }
 .cupom-desconto--50 { background: var(--c-amber-bg); color: var(--c-amber-fg); font-weight: 800; }
+
+/* código do cupom em destaque enquanto está no período de 50% —
+   amarelo com contorno preto grosso, estilo adesivo (ver "Exemplo
+   texto.webp" na pasta do projeto) */
+.cupom-codigo--50 {
+  color: #ffd400;
+  -webkit-text-stroke: 1.5px #000;
+  text-stroke: 1.5px #000;
+  paint-order: stroke fill;
+}
+
+/* cupom pausado — risco mostrando que está fora do ar */
+.cupom-pausado { text-decoration: line-through; opacity: 0.55; }
 
 /* ================= DETALHE (parceiro) ================= */
 .detail-head {
@@ -394,6 +551,7 @@ button { font: inherit; }
 }
 .stat-num { font-family: var(--font-display); font-size: 24px; color: var(--accent-dark); }
 .stat-label { font-size: 12.5px; color: var(--text-soft); font-weight: 600; margin-top: 2px; }
+.stat[data-stat-tip] { cursor: help; }
 
 /* ================= CARD DE GRÁFICO ================= */
 .chart-card {

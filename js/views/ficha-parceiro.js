@@ -16,15 +16,12 @@ import { store } from "../data/store.js";
 import { esc, formatMoeda, formatDataBR } from "../ui/dom.js";
 import { badge, badgeFromLista } from "../ui/badges.js";
 import { openModal, fieldText, fieldTextarea, fieldSelect, readValue } from "../ui/modal.js";
-import { chaveCupom, validadeCupomTexto } from "../util/cupom.js";
+import { fieldResponsavel, wireResponsavelField, readResponsavel } from "../ui/campo-responsavel.js";
+import { acaoRowHtml } from "../ui/acao-row.js";
+import { acoesDe, adicionarAcao, editarAcao, concluirAcao, excluirAcao, STAGE_META } from "../data/funil.js";
+import { chaveCupom, validadeCupomTexto, cupomEm50 } from "../util/cupom.js";
 import { dedupLancamentos } from "../util/periodo.js";
 
-const STAGE_META = {
-  lead: { label: "Lead", cor: "gray" },
-  negociacao: { label: "Negociação / Em contato", cor: "amber" },
-  ativo: { label: "Ativo", cor: "green" },
-  perdido: { label: "Perdido / Sem resposta", cor: "red" },
-};
 const INTERACTION_META = {
   email: { label: "E-mail", cor: "blue" },
   ligacao: { label: "Ligação", cor: "teal" },
@@ -41,7 +38,7 @@ function avisarMudanca() {
 export async function renderFichaParceiro(app, id) {
   const partner = await store.getPartner(id);
   if (!partner) {
-    app.innerHTML = `<a class="back-link" href="#/parceiros">← Voltar para parceiros</a>
+    app.innerHTML = `<a class="back-link" href="#/parceiros/ativos">← Voltar para parceiros</a>
       <div class="empty">Parceiro não encontrado.</div>`;
     return;
   }
@@ -66,9 +63,10 @@ export async function renderFichaParceiro(app, id) {
   const fatCupom = lancamentosDoCupom.reduce((s, l) => s + l.faturamentoCupom, 0);
 
   const stageMeta = STAGE_META[partner.stage] || { label: partner.stage || "—", cor: "gray" };
+  const acoesPendentes = acoesDe(partner).filter((a) => !a.concluidaEm);
 
   app.innerHTML = `
-    <a class="back-link" href="#/parceiros">← Voltar para parceiros</a>
+    <a class="back-link" href="#/parceiros/ativos">← Voltar para parceiros</a>
 
     <div class="detail-head">
       <div>
@@ -84,7 +82,6 @@ export async function renderFichaParceiro(app, id) {
     ${(partner.tags || []).length ? `<div class="row-end" style="margin-bottom:16px">${partner.tags.map((t) => `<span class="tag">${esc(t)}</span>`).join(" ")}</div>` : ""}
 
     <div class="meta-grid">
-      ${metaCell("Área", esc(partner.area || "—"))}
       ${metaCell("Endereço", esc(partner.address || "—"))}
       ${metaCell("Responsável", esc(partner.responsavel || "—"))}
       ${metaCell("E-mail", esc(partner.contact?.email || "—"))}
@@ -93,7 +90,15 @@ export async function renderFichaParceiro(app, id) {
     </div>
     ${partner.contactRaw ? `<div class="note"><span class="note-i">ⓘ</span>Contato original: ${esc(partner.contactRaw)}</div>` : ""}
 
-    ${nextActionHtml(partner.nextAction)}
+    <!-- PRÓXIMAS AÇÕES -->
+    <section class="section">
+      <div class="section-head"><h2>Próximas ações</h2>
+        <button class="btn btn-ghost edit-only" data-act="nova-acao">+ Nova ação</button></div>
+      <div class="list-card" id="proximas-acoes">
+        ${acoesPendentes.length ? acoesPendentes.map((a) => acaoRowHtml(partner.id, a)).join("")
+          : `<div class="empty">Nenhuma próxima ação definida.</div>`}
+      </div>
+    </section>
 
     <!-- TIMELINE DE INTERAÇÕES -->
     <section class="section">
@@ -127,20 +132,7 @@ export async function renderFichaParceiro(app, id) {
 
   const acoes = {
     "editar-cadastro": () => abrirEditarCadastro(partner),
-    "editar-proxima-acao": () => abrirEditarProximaAcao(partner),
-    "concluir-proxima-acao": async () => {
-      await store.addInteraction(partner.id, {
-        type: "nota", summary: `Ação concluída: ${partner.nextAction.description}`,
-        date: new Date().toISOString().slice(0, 10),
-      });
-      await store.updatePartner(partner.id, { nextAction: null });
-      avisarMudanca();
-    },
-    "excluir-proxima-acao": async () => {
-      if (!confirm("Excluir esta próxima ação?")) return;
-      await store.updatePartner(partner.id, { nextAction: null });
-      avisarMudanca();
-    },
+    "nova-acao": () => abrirFormAcaoFicha(partner),
     "nova-interacao": () => abrirNovaInteracao(partner),
     "cupom": () => parceiro
       ? abrirCupomDoParceiro(parceiro, cuponsIrmaos, grupos, listas)
@@ -149,12 +141,13 @@ export async function renderFichaParceiro(app, id) {
       if (!confirm(`Excluir "${partner.name}"?\n\nOs dados de lançamento do cupom em Base de dados também serão apagados. Não dá pra desfazer.\n\nDeseja prosseguir?`)) return;
       await store.removeParceiro(partner.id);
       await store.removePartner(partner.id);
-      location.hash = "#/parceiros";
+      location.hash = "#/parceiros/ativos";
     },
   };
-  app.querySelectorAll("[data-act]").forEach((btn) =>
-    btn.addEventListener("click", () => acoes[btn.dataset.act]?.())
-  );
+  app.querySelectorAll("[data-act]").forEach((btn) => {
+    if (btn.closest("#proximas-acoes")) return; // linhas de ação têm seu próprio listener delegado abaixo — evita disparar 2 handlers pro mesmo data-act (ex.: "excluir" também é o botão de excluir o parceiro inteiro)
+    btn.addEventListener("click", () => acoes[btn.dataset.act]?.());
+  });
 
   app.querySelector("#interacoes").addEventListener("click", async (e) => {
     const iid = e.target.dataset.id;
@@ -162,6 +155,25 @@ export async function renderFichaParceiro(app, id) {
     if (!confirm("Excluir esta interação?")) return;
     await store.removeInteraction(partner.id, iid);
     avisarMudanca();
+  });
+
+  app.querySelector("#proximas-acoes").addEventListener("click", async (e) => {
+    const row = e.target.closest(".acao-row");
+    if (!row) return;
+    const act = e.target.closest("[data-act]")?.dataset.act;
+    if (!act) return;
+    const acaoId = row.dataset.id;
+    if (act === "concluir") {
+      await concluirAcao(partner.id, partner, acaoId);
+      avisarMudanca();
+    } else if (act === "editar") {
+      const acao = acoesDe(partner).find((a) => a.id === acaoId);
+      if (acao) abrirFormAcaoFicha(partner, acao);
+    } else if (act === "excluir") {
+      if (!confirm("Excluir esta ação?")) return;
+      await excluirAcao(partner.id, partner, acaoId);
+      avisarMudanca();
+    }
   });
 }
 
@@ -173,35 +185,6 @@ function metaCell(label, valueHtml) {
   return `<div class="meta-cell">
     <div class="meta-label">${label}</div>
     <div class="meta-value">${valueHtml}</div>
-  </div>`;
-}
-
-/* ---------- Próxima ação ---------- */
-function nextActionUrgencia(dueDate) {
-  if (!dueDate) return "";
-  const hoje = new Date().toISOString().slice(0, 10);
-  if (dueDate < hoje) return " next-action--overdue";
-  const emSeteDias = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
-  if (dueDate <= emSeteDias) return " next-action--soon";
-  return "";
-}
-function nextActionHtml(nextAction) {
-  const tem = nextAction && (nextAction.description || nextAction.dueDate);
-  return `<div class="next-action${tem ? nextActionUrgencia(nextAction.dueDate) : ""}">
-    <div>
-      <div class="next-action-label">${tem ? "Próxima ação" : "Nenhuma próxima ação definida"}</div>
-      ${tem ? `
-        <div class="next-action-desc">${esc(nextAction.description || "—")}</div>
-        <div class="next-action-date">${esc(formatDataBR(nextAction.dueDate))}</div>
-      ` : ""}
-    </div>
-    ${tem ? `
-      <div class="row-end">
-        <button class="btn btn-ghost edit-only" data-act="concluir-proxima-acao">✓ Concluída</button>
-        <button class="btn btn-ghost edit-only" data-act="editar-proxima-acao">Editar</button>
-        <button class="btn btn-ghost btn-danger edit-only" data-act="excluir-proxima-acao" title="Excluir">🗑</button>
-      </div>
-    ` : `<button class="btn btn-ghost edit-only" data-act="editar-proxima-acao">+ Definir</button>`}
   </div>`;
 }
 
@@ -236,7 +219,7 @@ function couponRowAntigo(parceiro, cuponsIrmaos, listas, uso, fat, grupos) {
   const outros = cuponsIrmaos.filter((p) => p.id !== parceiro.id).map((p) => p.nome);
   return `<div class="list-row">
     <div class="lr-main">
-      <div class="lr-title"><strong>${esc((parceiro.cupom || "").toUpperCase())}</strong> ${badgeFromLista(listas.statusCupom, parceiro.statusCupom)}</div>
+      <div class="lr-title"><strong${cupomEm50(parceiro, grupos) ? ' class="cupom-codigo--50"' : ""}>${esc((parceiro.cupom || "").toUpperCase())}</strong> ${badgeFromLista(listas.statusCupom, parceiro.statusCupom)}</div>
       <div class="lr-sub">${esc(validadeCupomTexto(parceiro, grupos))}</div>
       <div class="lr-sub">${uso} usos · ${esc(formatMoeda(fat))} via cupom</div>
       ${outros.length ? `<div class="lr-sub">Também usado por (leads): ${esc(outros.join(", "))}</div>` : ""}
@@ -291,6 +274,7 @@ async function abrirCupomDoParceiro(parceiro, cuponsIrmaos, grupos, listas) {
 
 /* ---------- Modais ---------- */
 async function abrirEditarCadastro(partner) {
+  const listas = await store.getListas();
   openModal({
     title: "Editar cadastro",
     subtitle: partner.name,
@@ -298,10 +282,7 @@ async function abrirEditarCadastro(partner) {
     wide: true,
     bodyHtml: `
       ${fieldText("name", "Nome do negócio", { required: true, value: partner.name || "" })}
-      <div class="field-2col">
-        ${fieldText("type", "Tipo", { value: partner.type || "", placeholder: "Ex.: imprensa, influencer, distribuidor…" })}
-        ${fieldText("area", "Área", { value: partner.area || "" })}
-      </div>
+      ${fieldSelect("type", "Tipo", listas.tipoNegocio, { value: partner.type || listas.tipoNegocio[0]?.valor })}
       ${fieldText("address", "Endereço", { value: partner.address || "" })}
       ${fieldText("responsavel", "Responsável", { value: partner.responsavel || "" })}
       <div class="field-2col">
@@ -318,7 +299,6 @@ async function abrirEditarCadastro(partner) {
       await store.updatePartner(partner.id, {
         name,
         type: readValue(form, "type"),
-        area: readValue(form, "area"),
         address: readValue(form, "address"),
         responsavel: readValue(form, "responsavel"),
         contact: {
@@ -333,24 +313,31 @@ async function abrirEditarCadastro(partner) {
   });
 }
 
-async function abrirEditarProximaAcao(partner) {
-  const atual = partner.nextAction || {};
+async function abrirFormAcaoFicha(partner, acaoExistente = null) {
+  const ed = !!acaoExistente;
+  const atual = acaoExistente || {};
   openModal({
-    title: "Próxima ação",
+    title: ed ? "Editar ação" : "Nova ação",
     subtitle: partner.name,
     submitLabel: "Salvar",
     bodyHtml: `
-      ${fieldTextarea("description", "Descrição", { value: atual.description || "", placeholder: "Ex.: Ligar pra confirmar renovação do cupom" })}
-      ${fieldText("dueDate", "Data", { type: "date", value: atual.dueDate || "" })}
+      ${fieldTextarea("description", "Descrição", { required: true, value: atual.description || "", placeholder: "Ex.: Ligar pra confirmar renovação do cupom" })}
+      <div class="field-2col">
+        ${fieldText("dataInicio", "Início (opcional)", { type: "date", value: atual.dataInicio || "" })}
+        ${fieldText("dueDate", "Prazo", { type: "date", required: true, value: atual.dueDate || "" })}
+      </div>
+      ${fieldResponsavel(atual.responsavel || "")}
     `,
+    onMount: wireResponsavelField,
     onSubmit: async (form) => {
       const description = readValue(form, "description");
       const dueDate = readValue(form, "dueDate");
-      if (description && !dueDate) throw new Error("Informe a data da próxima ação.");
-      if (dueDate && !description) throw new Error("Informe a descrição da próxima ação.");
-      await store.updatePartner(partner.id, {
-        nextAction: description && dueDate ? { description, dueDate } : null,
-      });
+      const dataInicio = readValue(form, "dataInicio") || new Date().toISOString().slice(0, 10);
+      const responsavel = readResponsavel(form);
+      if (!description) throw new Error("Descreva a ação.");
+      if (!dueDate) throw new Error("Informe o prazo.");
+      if (ed) await editarAcao(partner.id, partner, acaoExistente.id, { description, dueDate, dataInicio, responsavel });
+      else await adicionarAcao(partner.id, partner, { description, dueDate, dataInicio, responsavel });
       avisarMudanca();
     },
   });

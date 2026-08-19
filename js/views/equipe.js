@@ -1,0 +1,196 @@
+/* Equipe — mapa consolidado de todas as lojas e ações, compartilhado
+   (não filtra pela loja atual, ao contrário do resto do app). Cada
+   linha principal é uma loja cadastrada; dentro dela, uma sub-linha
+   por responsável (Fred/Manu/Laura/Outros) com uma barra por task
+   "Geral" (mesma coleção `tasks` que Próximos Passos usa pra ações
+   sem negócio vinculado — ver js/data/funil.js). As colunas são meses,
+   calculadas a partir do intervalo real das tasks (do mês mais cedo ao
+   mês mais tarde que aparecer). Clicar numa barra edita a task na
+   hora — a mudança aparece tanto aqui quanto no "A Fazer" da loja dona
+   dela, porque é o mesmo dado. A linha CRM é só informativa: sempre
+   esticada do primeiro ao último mês, sem clique. */
+
+import { store } from "../data/store.js";
+import { esc } from "../ui/dom.js";
+import { openModal, fieldText, fieldTextarea, readValue } from "../ui/modal.js";
+import { fieldResponsavel, wireResponsavelField, readResponsavel } from "../ui/campo-responsavel.js";
+import { corDe, bucketDe, MES_NOMES } from "../data/funil.js";
+
+function avisarMudanca() {
+  window.dispatchEvent(new CustomEvent("data-changed"));
+}
+
+// intervalo de meses [{ano,mes}] cobrindo do início mais cedo ao prazo
+// mais tarde entre todas as tasks — tasks sem dataInicio usam o
+// próprio prazo como início (evento de "1 mês só", mesmo fallback já
+// usado no calendário de Próximos Passos).
+function mesesDoIntervalo(tasks) {
+  let minIso = null, maxIso = null;
+  for (const t of tasks) {
+    const fim = t.dueDate;
+    if (!fim) continue;
+    const inicio = t.dataInicio && t.dataInicio <= fim ? t.dataInicio : fim;
+    if (!minIso || inicio < minIso) minIso = inicio;
+    if (!maxIso || fim > maxIso) maxIso = fim;
+  }
+  if (!minIso) return [];
+  const [anoIni, mesIni] = minIso.slice(0, 7).split("-").map(Number);
+  const [anoFim, mesFim] = maxIso.slice(0, 7).split("-").map(Number);
+  const meses = [];
+  let ano = anoIni, mes = mesIni;
+  while (ano < anoFim || (ano === anoFim && mes <= mesFim)) {
+    meses.push({ ano, mes });
+    mes++;
+    if (mes > 12) { mes = 1; ano++; }
+  }
+  return meses;
+}
+function indiceMes(meses, iso) {
+  const [ano, mes] = iso.slice(0, 7).split("-").map(Number);
+  return meses.findIndex((m) => m.ano === ano && m.mes === mes);
+}
+
+export async function renderEquipe(app) {
+  const [lojas, tasks] = await Promise.all([
+    store.listLojas(),
+    store.listTasksTodasLojas(),
+  ]);
+  const lojasOrdenadas = [...lojas].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+  const meses = mesesDoIntervalo(tasks);
+
+  app.innerHTML = `
+    <div class="page-head">
+      <div><h1 class="page-title">Equipe</h1></div>
+    </div>
+    ${meses.length
+      ? `<div class="mapa-equipe" id="mapa-equipe"></div>`
+      : `<div class="empty">Nenhuma demanda cadastrada ainda — cadastre uma ação "Geral" em alguma loja (Kanban → Próximos Passos) pra ela aparecer aqui.</div>`}
+  `;
+  if (!meses.length) return;
+
+  const porLoja = new Map(lojasOrdenadas.map((l) => [l.id, []]));
+  for (const t of tasks) {
+    if (porLoja.has(t.lojaId)) porLoja.get(t.lojaId).push(t);
+  }
+
+  const mapa = app.querySelector("#mapa-equipe");
+  mapa.innerHTML = `
+    <div class="mapa-cabecalho">
+      <div class="mapa-cabecalho-label"></div>
+      <div class="mapa-cabecalho-meses" style="grid-template-columns:repeat(${meses.length},1fr)">
+        ${meses.map((m) => `<div class="mapa-mes">${esc(MES_NOMES[m.mes - 1].slice(0, 3).toUpperCase())}</div>`).join("")}
+      </div>
+    </div>
+    ${lojasOrdenadas.map((loja) => lojaBlocoHtml(loja, porLoja.get(loja.id), meses)).join("")}
+    ${crmBlocoHtml(meses)}
+  `;
+
+  mapa.addEventListener("click", (e) => {
+    const bar = e.target.closest("[data-task-id]");
+    if (!bar) return;
+    const task = tasks.find((t) => t.id === bar.dataset.taskId);
+    if (!task) return;
+    const loja = lojasOrdenadas.find((l) => l.id === task.lojaId);
+    abrirEditarTarefa(task, loja?.nome || "");
+  });
+}
+
+function lojaBlocoHtml(loja, tasksDaLoja, meses) {
+  const porResponsavel = new Map();
+  for (const t of tasksDaLoja) {
+    const b = bucketDe(t.responsavel);
+    if (!porResponsavel.has(b)) porResponsavel.set(b, []);
+    porResponsavel.get(b).push(t);
+  }
+  const buckets = [...porResponsavel.entries()];
+  return `
+    <div class="mapa-loja">
+      <div class="mapa-loja-nome">${esc(loja.nome)}</div>
+      ${buckets.length
+        ? buckets.map(([responsavel, itens]) => subLinhaHtml(responsavel, itens, meses)).join("")
+        : `<div class="mapa-vazio muted">Nenhuma demanda cadastrada.</div>`}
+    </div>
+  `;
+}
+
+function subLinhaHtml(responsavel, itens, meses) {
+  const posicionadas = itens
+    .map((t) => {
+      const fim = t.dueDate;
+      const inicio = t.dataInicio && t.dataInicio <= fim ? t.dataInicio : fim;
+      const idxIni = Math.max(0, indiceMes(meses, inicio));
+      const idxFim = Math.min(meses.length - 1, indiceMes(meses, fim));
+      return { ...t, idxIni, idxFim };
+    })
+    .sort((a, b) => a.idxIni - b.idxIni);
+
+  // mesmo algoritmo guloso de pistas do calendário-agenda (ver
+  // js/views/kanban-proximos-passos.js:semanaHtml), só que por mês em
+  // vez de por dia — duas demandas da mesma pessoa que se sobrepõem no
+  // tempo ganham pistas separadas em vez de se sobrepor visualmente.
+  const finalPorPista = [];
+  const comPista = posicionadas.map((t) => {
+    let pista = finalPorPista.findIndex((fim) => fim < t.idxIni);
+    if (pista === -1) { pista = finalPorPista.length; finalPorPista.push(t.idxFim); }
+    else finalPorPista[pista] = t.idxFim;
+    return { ...t, pista };
+  });
+
+  return `
+    <div class="mapa-sub-linha">
+      <div class="mapa-sub-nome"><span class="pp-cor-dot pp-cor-dot--${corDe(responsavel)}"></span>${esc(responsavel)}</div>
+      <div class="mapa-sub-pistas">
+        ${finalPorPista.map((_, pistaIdx) => `
+          <div class="mapa-pista" style="grid-template-columns:repeat(${meses.length},1fr)">
+            ${comPista.filter((t) => t.pista === pistaIdx).map((t) => `
+              <div class="mapa-bar pp-bar--${corDe(responsavel)}" style="grid-column:${t.idxIni + 1}/${t.idxFim + 2}" data-task-id="${esc(t.id)}" title="${esc(t.description)}">${esc(t.description)}</div>
+            `).join("")}
+          </div>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function crmBlocoHtml(meses) {
+  return `
+    <div class="mapa-loja mapa-loja--crm">
+      <div class="mapa-loja-nome">CRM <span class="muted" style="font-weight:400;font-size:11px">(atividade contínua)</span></div>
+      <div class="mapa-sub-linha">
+        <div class="mapa-sub-nome"></div>
+        <div class="mapa-sub-pistas">
+          <div class="mapa-pista" style="grid-template-columns:repeat(${meses.length},1fr)">
+            <div class="mapa-bar mapa-bar--crm" style="grid-column:1/${meses.length + 1}">Manutenção do CRM, ajustes, alimentação e análise de dados</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function abrirEditarTarefa(task, lojaNome) {
+  openModal({
+    title: "Editar demanda",
+    subtitle: lojaNome,
+    submitLabel: "Salvar",
+    bodyHtml: `
+      ${fieldTextarea("description", "Descrição", { required: true, value: task.description || "" })}
+      <div class="field-2col">
+        ${fieldText("dataInicio", "Início (opcional)", { type: "date", value: task.dataInicio || "" })}
+        ${fieldText("dueDate", "Prazo", { type: "date", required: true, value: task.dueDate || "" })}
+      </div>
+      ${fieldResponsavel(task.responsavel || "")}
+    `,
+    onMount: wireResponsavelField,
+    onSubmit: async (form) => {
+      const description = readValue(form, "description");
+      const dueDate = readValue(form, "dueDate");
+      const dataInicio = readValue(form, "dataInicio") || "";
+      const responsavel = readResponsavel(form);
+      if (!description) throw new Error("Descreva a demanda.");
+      if (!dueDate) throw new Error("Informe o prazo.");
+      await store.updateTaskGeral(task.id, { description, dueDate, dataInicio, responsavel });
+      avisarMudanca();
+    },
+  });
+}

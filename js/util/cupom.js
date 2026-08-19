@@ -50,6 +50,23 @@ export function descontoAtual(parceiro, grupos) {
   return { percentual: DESCONTO_PADRAO, inicio: parceiro.dataInicio || "", fim: parceiro.dataVencimento || "" };
 }
 
+// hoje o cupom está no período de 50% (ver descontoAtual) — usado pra
+// destacar visualmente o código do cupom onde ele aparece como rótulo
+export function cupomEm50(parceiro, grupos) {
+  return descontoAtual(parceiro, grupos).percentual === DESCONTO_ESPECIAL;
+}
+
+// Status "efetivo" pro cupom — some com um vencido (dataVencimento no
+// passado) mesmo que ninguém tenha pausado manualmente: aparece como
+// Pausado assim que a data passa, sem precisar mexer no campo à mão.
+// Não sobrescreve statusCupom no banco, só o jeito que é exibido/usado
+// pra decidir a ação do botão Pausar/Reativar.
+export function statusCupomEfetivo(parceiro) {
+  const hoje = new Date().toISOString().slice(0, 10);
+  if (parceiro.dataVencimento && parceiro.dataVencimento < hoje) return "Pausado";
+  return parceiro.statusCupom || "Ativo";
+}
+
 /* Texto "20% até DD/MM/AAAA / 50% até DD/MM/AAAA" — mesmo formato do
    campo livre "periodoDesconto" original, só que calculado ao vivo a
    partir da vigência do cupom (20%) e do período especial do grupo

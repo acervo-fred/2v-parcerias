@@ -1,14 +1,14 @@
 /* Router por hash (#/...). Cada rota renderiza uma view dentro de #app. */
 
-import { renderProspeccao } from "./views/prospeccao.js";
-import { renderParceiros } from "./views/parceiros-list.js";
+import { renderParceirosHub } from "./views/parceiros-hub.js";
 import { renderFichaParceiro } from "./views/ficha-parceiro.js";
-import { renderKanban } from "./views/kanban.js";
+import { renderKanbanHub } from "./views/kanban-hub.js";
 import { renderCupons } from "./views/cupons.js";
 import { renderLancamentos } from "./views/lancamentos.js";
 import { renderDashboard } from "./views/dashboard.js";
 import { renderBackup } from "./views/backup.js";
 import { renderAcessos } from "./views/acessos.js";
+import { renderEquipe } from "./views/equipe.js";
 import { initLojaSwitcher } from "./ui/loja-switcher.js";
 import { esc } from "./ui/dom.js";
 import { onAuthChange, loginComGoogle, logout } from "./data/auth.js";
@@ -23,6 +23,21 @@ function setActiveNav(name) {
   );
 }
 
+/* Sub-lista (Parceiros: Prospecção/Parceiros Ativos; Kanban: Pipeline/
+   Próximos passos) na sidebar: fica aberta e com o item certo
+   destacado sempre que a rota atual é a dela — fecha sozinha em
+   qualquer outra rota. Não guarda estado próprio — é sempre derivada
+   do hash atual, então nunca fica "aberta" fora do lugar depois de
+   navegar embora. */
+function atualizarNavSub(id, subguia) {
+  const sub = document.getElementById(id);
+  if (!sub) return;
+  sub.classList.toggle("open", !!subguia);
+  sub.querySelectorAll("[data-nav-sub]").forEach((a) =>
+    a.classList.toggle("active", a.dataset.navSub === subguia)
+  );
+}
+
 async function router() {
   if (!location.hash || location.hash === "#") {
     location.replace(location.pathname + "#/");
@@ -34,24 +49,33 @@ async function router() {
   window.scrollTo(0, 0);
 
   try {
+    atualizarNavSub("nav-parceiros-sub", null); // fecha por padrão — os cases donos reabrem
+    atualizarNavSub("nav-kanban-sub", null);
     switch (rota) {
       case "":
       case undefined:
-        setActiveNav("prospeccao");
-        await renderProspeccao(app);
+        setActiveNav("dashboard");
+        await renderDashboard(app);
         break;
-      case "parceiros":
+      case "parceiros": {
         setActiveNav("parceiros");
-        await renderParceiros(app);
+        const subguia = ["prospeccao", "ativos"].includes(param) ? param : "prospeccao";
+        atualizarNavSub("nav-parceiros-sub", subguia);
+        await renderParceirosHub(app, subguia);
         break;
+      }
       case "parceiro":
         setActiveNav("parceiros");
+        atualizarNavSub("nav-parceiros-sub", "ativos");
         await renderFichaParceiro(app, param);
         break;
-      case "kanban":
+      case "kanban": {
         setActiveNav("kanban");
-        await renderKanban(app);
+        const subguia = ["pipeline", "proximos-passos"].includes(param) ? param : "pipeline";
+        atualizarNavSub("nav-kanban-sub", subguia);
+        await renderKanbanHub(app, subguia);
         break;
+      }
       case "cupons":
         setActiveNav("cupons");
         await renderCupons(app);
@@ -63,6 +87,10 @@ async function router() {
       case "dashboard":
         setActiveNav("dashboard");
         await renderDashboard(app);
+        break;
+      case "equipe":
+        setActiveNav("equipe");
+        await renderEquipe(app);
         break;
       case "backup":
         await renderBackup(app);

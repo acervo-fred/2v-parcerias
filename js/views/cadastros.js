@@ -6,6 +6,7 @@ import { esc, parseNumeroBR, formatNumeroBR } from "../ui/dom.js";
 import { openModal, fieldText, fieldTextarea, fieldSelect, readValue } from "../ui/modal.js";
 import { PERIODO_TIPOS, PERIODO_MAP, rotuloTipoAtual, calcularDataFim, calcularRotulo, calcularEntradaLancamento } from "../util/periodo.js";
 import { agruparParceirosPorCupom } from "../util/cupom.js";
+import { garantirPartner } from "../data/funil.js";
 
 function avisarMudanca() {
   window.dispatchEvent(new CustomEvent("data-changed"));
@@ -44,7 +45,10 @@ function wirePeriodo(form) {
   recalcularTudo();
 }
 
-/* ---------------- Prospecção (criar / editar dados-base) ---------------- */
+/* ---------------- Prospecção (criar / editar dados-base) ----------------
+   Só pra cadastrar lugares que podem virar parceiro — sem Área (a loja
+   da página já resolve isso) nem Status (o estágio é sempre derivado
+   do Kanban — ver js/views/kanban.js e js/views/prospeccao.js). */
 export async function abrirNovoProspecto(existente = null) {
   const listas = await store.getListas();
   const ed = !!existente;
@@ -53,55 +57,64 @@ export async function abrirNovoProspecto(existente = null) {
     title: ed ? "Editar prospecção" : "Nova prospecção",
     submitLabel: ed ? "Salvar alterações" : "Adicionar",
     bodyHtml: `
-      <div class="field-2col">
-        ${fieldSelect("area", "Área", listas.areas, { value: p.area || listas.areas[0] })}
-        ${fieldSelect("tipo", "Tipo de negócio", listas.tipoNegocio, { value: p.tipo || listas.tipoNegocio[0]?.valor })}
-      </div>
+      ${fieldSelect("tipo", "Tipo de negócio", listas.tipoNegocio, { value: p.tipo || listas.tipoNegocio[0]?.valor })}
       ${fieldText("nome", "Nome do negócio", { required: true, value: p.nome || "", placeholder: "Ex.: Salus Flamengo" })}
       ${fieldText("local", "Local / endereço", { value: p.local || "", placeholder: "Ex.: Praia do Flamengo, 154" })}
       <div class="field-2col">
         ${fieldText("responsavel", "Responsável", { value: p.responsavel || "", placeholder: "Nome de contato" })}
         ${fieldText("contato", "Contato", { value: p.contato || "", placeholder: "Telefone ou e-mail" })}
       </div>
-      ${fieldSelect("statusProspeccao", "Status da prospecção", listas.statusProspeccao, { value: p.statusProspeccao || listas.statusProspeccao[0]?.valor })}
       ${fieldTextarea("observacoes", "Observações", { value: p.observacoes || "", placeholder: "Contexto, indicação, próximos passos…" })}
     `,
     onSubmit: async (form) => {
       const nome = readValue(form, "nome");
       if (!nome) throw new Error("Informe o nome do negócio.");
       const campos = {
-        area: readValue(form, "area"),
         tipo: readValue(form, "tipo"),
         nome,
         local: readValue(form, "local"),
         responsavel: readValue(form, "responsavel"),
         contato: readValue(form, "contato"),
-        statusProspeccao: readValue(form, "statusProspeccao"),
         observacoes: readValue(form, "observacoes"),
       };
-      if (ed) await store.updateParceiro(p.id, campos);
-      else await store.addParceiro(campos);
+      if (ed) {
+        await store.updateParceiro(p.id, campos);
+      } else {
+        const novo = await store.addParceiro(campos);
+        // já nasce com doc espelho em `partners` (stage "lead") pra
+        // Ficha do Parceiro funcionar desde o primeiro cadastro, sem
+        // esperar o negócio "avançar" no Kanban (ver funil.js)
+        await garantirPartner(novo.id, novo, {}, {});
+      }
       avisarMudanca();
     },
   });
 }
 
-/* ---------------- Fechar parceria (prospecto -> parceiro) ---------------- */
+/* Fecha parceria a partir de um cadastro de Prospecção que já avançou
+   pro estágio "Negociação / Em contato" no Kanban (ver
+   js/views/kanban.js e js/views/prospeccao.js). Registra o cupom e
+   marca ehParceiro=true no parceiro (store.fecharParceria, já
+   existente); em seguida garante o doc espelho em `partners` com
+   stage "ativo" — cria (mesmo id do parceiro) se ainda não existir
+   (caso comum: negócio fechado direto de "Lead", sem passar por
+   "Negociação" no Kanban), ou só atualiza o estágio se já existir. */
 export async function abrirFecharParceria(parceiro) {
   const listas = await store.getListas();
   openModal({
     title: "Fechar parceria",
     subtitle: parceiro.nome,
     submitLabel: "Fechar parceria",
+    wide: true,
     bodyHtml: `
       <div class="field-2col">
-        ${fieldText("cupom", "Código do cupom", { required: true, value: parceiro.cupom || "", placeholder: "Ex.: SALUS2V" })}
+        ${fieldText("cupom", "Código do cupom", { required: true, value: "" })}
         ${fieldSelect("statusCupom", "Status do cupom", listas.statusCupom, { value: "Ativo" })}
       </div>
-      ${fieldText("periodoDesconto", "Período de desconto", { value: parceiro.periodoDesconto || "", placeholder: "Ex.: 50% até 15/05 / 20% até 31/08" })}
+      ${fieldText("periodoDesconto", "Período de desconto", { value: "", placeholder: "Ex.: 50% até 15/05 / 20% até 31/08" })}
       <div class="field-2col">
-        ${fieldText("dataInicio", "Início da vigência", { type: "date", value: parceiro.dataInicio || "" })}
-        ${fieldText("dataVencimento", "Vencimento", { type: "date", value: parceiro.dataVencimento || "" })}
+        ${fieldText("dataInicio", "Início da vigência", { type: "date", value: "" })}
+        ${fieldText("dataVencimento", "Vencimento", { type: "date", value: "" })}
       </div>
     `,
     onSubmit: async (form) => {
@@ -114,6 +127,17 @@ export async function abrirFecharParceria(parceiro) {
         dataInicio: readValue(form, "dataInicio"),
         dataVencimento: readValue(form, "dataVencimento"),
       });
+      const agora = new Date().toISOString().slice(0, 10);
+      const partnerExistente = await store.getPartner(parceiro.id);
+      if (partnerExistente) {
+        await store.updatePartner(parceiro.id, { stage: "ativo", stageUpdatedAt: agora });
+      } else {
+        await store.addPartner(parceiro.id, {
+          name: parceiro.nome, type: parceiro.tipo || "", address: parceiro.local || "",
+          responsavel: parceiro.responsavel || "", contactRaw: parceiro.contato || "",
+          stage: "ativo", stageUpdatedAt: agora,
+        });
+      }
       avisarMudanca();
     },
   });
@@ -127,10 +151,7 @@ export async function abrirNovoParceiro() {
     submitLabel: "Adicionar",
     wide: true,
     bodyHtml: `
-      <div class="field-2col">
-        ${fieldSelect("area", "Área", listas.areas, { value: listas.areas[0] })}
-        ${fieldSelect("tipo", "Tipo de negócio", listas.tipoNegocio, { value: listas.tipoNegocio[0]?.valor })}
-      </div>
+      ${fieldSelect("tipo", "Tipo de negócio", listas.tipoNegocio, { value: listas.tipoNegocio[0]?.valor })}
       ${fieldText("nome", "Nome do negócio", { required: true, value: "", placeholder: "Ex.: Salus Flamengo" })}
       ${fieldText("local", "Local / endereço", { value: "", placeholder: "Ex.: Praia do Flamengo, 154" })}
       <div class="field-2col">
@@ -154,7 +175,6 @@ export async function abrirNovoParceiro() {
       if (!nome) throw new Error("Informe o nome do negócio.");
       if (!cupom) throw new Error("Informe o código do cupom.");
       const novo = await store.addParceiro({
-        area: readValue(form, "area"),
         tipo: readValue(form, "tipo"),
         nome,
         local: readValue(form, "local"),
@@ -170,6 +190,9 @@ export async function abrirNovoParceiro() {
         dataVencimento: readValue(form, "dataVencimento"),
         observacoes: readValue(form, "observacoes"),
       });
+      // já registrado como parceria fechada — nasce direto com Status
+      // "Ativo" no Pipeline (ver funil.js:garantirPartner)
+      await garantirPartner(novo.id, novo, {}, { stage: "ativo" });
       avisarMudanca();
     },
   });
@@ -185,10 +208,7 @@ export async function abrirEditarParceiro(parceiro) {
     submitLabel: "Salvar alterações",
     wide: true,
     bodyHtml: `
-      <div class="field-2col">
-        ${fieldSelect("area", "Área", listas.areas, { value: p.area || listas.areas[0] })}
-        ${fieldSelect("tipo", "Tipo de negócio", listas.tipoNegocio, { value: p.tipo || listas.tipoNegocio[0]?.valor })}
-      </div>
+      ${fieldSelect("tipo", "Tipo de negócio", listas.tipoNegocio, { value: p.tipo || listas.tipoNegocio[0]?.valor })}
       ${fieldText("nome", "Nome do negócio", { required: true, value: p.nome || "" })}
       ${fieldText("local", "Local / endereço", { value: p.local || "" })}
       <div class="field-2col">
@@ -212,7 +232,6 @@ export async function abrirEditarParceiro(parceiro) {
       if (!nome) throw new Error("Informe o nome do negócio.");
       if (!cupom) throw new Error("Informe o código do cupom.");
       await store.updateParceiro(p.id, {
-        area: readValue(form, "area"),
         tipo: readValue(form, "tipo"),
         nome,
         local: readValue(form, "local"),
