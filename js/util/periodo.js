@@ -157,6 +157,15 @@ export function rotuloSemanaCurto(iniISO) {
   const [, m, d] = iniISO.split("-");
   return `${d}/${MES_ABREV_CURTO[parseInt(m, 10) - 1]}`;
 }
+/* Chave de agrupamento por mês ("2026-08") a partir de uma data ISO. */
+export function chaveMes(iso) {
+  return (iso || "").slice(0, 7);
+}
+/* Rótulo curto pro eixo dos gráficos: "ago/26". */
+export function rotuloMesCurto(chave) {
+  const [y, m] = chave.split("-");
+  return `${MES_ABREV_CURTO[parseInt(m, 10) - 1]}/${y.slice(2)}`;
+}
 
 /* Pra cada dia do mês/ano pedidos, diz se algum lançamento cobre esse
    dia ("ok", verde) ou se dois ou mais lançamentos DO MESMO parceiro

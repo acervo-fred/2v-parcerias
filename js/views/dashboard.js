@@ -1,11 +1,14 @@
-/* Dashboard — desempenho dos cupons, com período ajustável, filtros globais
-   (cupom / tipo de parceiro), comparação automática com o período
-   anterior, uma tabela de ranking ordenável/pesquisável (com rolagem) com
-   drill-down, e uma ferramenta de comparação (mesmo cupom em períodos
-   diferentes, ou dois cupons quaisquer no mesmo período — os dois campos
-   de período do comparador ficam sincronizados). Tudo calculado em cima
-   de listLancamentos() + listParceirosFechados(), sem nada gravado —
-   puramente derivado.
+/* Dashboard — desempenho dos cupons, com período ajustável, comparação
+   automática com o período anterior, KPIs de novos cupons e cupons por
+   faixa de desconto (20%/50% — ver cupomEhEspecial), dois gráficos "por
+   cupom" com toggle de desconto e granularidade (semana/mês), um card de
+   Tendências (retidos vs. novos), uma tabela de ranking ordenável/
+   pesquisável (com rolagem) com drill-down, e uma ferramenta de
+   comparação (mesmo cupom em períodos diferentes, ou dois cupons
+   quaisquer no mesmo período — os dois campos de período do comparador
+   ficam sincronizados). Tudo calculado em cima de listLancamentos() +
+   listParceirosFechados() + listGrupos(), sem nada gravado — puramente
+   derivado.
 
    Consolidação por código de cupom: quando duas empresas parceiras
    compartilham o mesmo código de cupom, todo o desempenho (rankings,
@@ -22,8 +25,8 @@
 
 import { store } from "../data/store.js";
 import { esc, formatMoeda } from "../ui/dom.js";
-import { lancamentoNoPeriodo, dedupLancamentos, inicioSemanaISO, fimSemanaISO, chaveSemana, rotuloSemanaCurto } from "../util/periodo.js";
-import { agruparParceirosPorCupom, chaveCupom } from "../util/cupom.js";
+import { lancamentoNoPeriodo, dedupLancamentos, inicioSemanaISO, fimSemanaISO, chaveSemana, rotuloSemanaCurto, chaveMes, rotuloMesCurto } from "../util/periodo.js";
+import { agruparParceirosPorCupom, chaveCupom, cupomEm50 } from "../util/cupom.js";
 
 const MES_NOMES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
 const TOP_N_CUPONS = 8;
@@ -32,28 +35,37 @@ const CORES_CATEGORICAS = ["#2a78d6", "#1baf7a", "#eda100", "#008300", "#4a3aa7"
 const COR_OUTROS = "var(--c-gray-fg)";
 
 export async function renderDashboard(app) {
-  const [lancamentosBrutos, parceiros, listas, lojaAtual] = await Promise.all([
+  const [lancamentosBrutos, parceiros, lojaAtual, grupos, listas] = await Promise.all([
     store.listLancamentos(),
     store.listParceirosFechados(),
-    store.getListas(),
     store.getLojaAtual(),
+    store.listGrupos(),
+    store.getListas(),
   ]);
   // mesmo parceiro+data lançado mais de uma vez → conta só o maior, não os dois
   const lancamentos = dedupLancamentos(lancamentosBrutos);
   const porId = Object.fromEntries(parceiros.map((p) => [p.id, p]));
+  const porIdGrupo = Object.fromEntries(grupos.map((g) => [String(g.numero), g]));
   // consolidação por código de cupom (ver js/util/cupom.js): mais de uma
   // empresa pode compartilhar o mesmo cupom — aqui elas contam como um só
   const linhasCupom = agruparParceirosPorCupom(parceiros);
   const chavePorParceiroId = Object.fromEntries(parceiros.map((p) => [p.id, chaveCupom(p)]));
   const porChave = Object.fromEntries(linhasCupom.map((lc) => [lc.chave, lc]));
   const cuponsOrdenados = [...linhasCupom].sort((a, b) => (a.cupom || "").localeCompare(b.cupom || "", "pt-BR"));
-  const mesesComDados = [...new Set(lancamentos.map((l) => (l.dataInicio || "").slice(0, 7)).filter(Boolean))].sort();
+  const tiposFiltro = ["Todos", ...listas.tipoNegocio.map((t) => t.valor)];
+  let filtroTipo = "Todos";
+  // "retidos" | "perdidos" — toggle do card de Tendências à esquerda
+  let modoRetidos = "retidos";
 
   const [deInicial, ateInicial] = presetRange("mes");
 
   // estado da tabela de ranking (sobrevive a trocas de filtro/período)
   const tabelaState = { sortKey: "fat", sortDir: "desc", busca: "" };
   let linhasRanking = []; // recalculada a cada atualizarPeriodo()
+  // estado dos dois gráficos "por cupom" (1.3/1.4) — cada um com seu
+  // próprio filtro de desconto e granularidade, independentes
+  const graficoFatState = { tier: "ambos", granularidade: "semana" };
+  const graficoUsoState = { tier: "ambos", granularidade: "semana" };
 
   app.innerHTML = `
     <div class="page-head">
@@ -65,35 +77,17 @@ export async function renderDashboard(app) {
         ${["semana", "semanapassada", "mes", "mespassado", "tudo"].map((p) =>
           `<button class="chip ${p === "mes" ? "active" : ""}" data-preset="${p}">${presetLabel(p)}</button>`
         ).join("")}
-        ${mesesComDados.length ? `
-          <select class="input select-compact" id="f-mes" style="width:auto">
-            <option value="">Mês…</option>
-            ${mesesComDados.map((m) => `<option value="${m}">${mesLabelLongo(m)}</option>`).join("")}
-          </select>` : ""}
+        <select class="input select-compact" id="f-tipo" style="width:auto">
+          ${tiposFiltro.map((t) => `<option value="${esc(t)}">${esc(t)}</option>`).join("")}
+        </select>
       </div>
       <div class="field" style="margin-bottom:0"><label>De</label><input class="input" type="date" id="f-de" value="${deInicial}"></div>
       <div class="field" style="margin-bottom:0"><label>Até</label><input class="input" type="date" id="f-ate" value="${ateInicial}"></div>
     </div>
-    <div class="toolbar" style="margin-bottom:14px; gap:24px; align-items:flex-end; flex-wrap:wrap">
-      <div class="field" style="margin-bottom:0"><label>Cupom</label>
-        <select class="input select-compact select-narrow" id="f-cupom">
-          <option value="">Todos os cupons</option>
-          ${cuponsOrdenados.map((lc) => {
-            const nomes = lc.parceiros.map((p) => p.nome).join(", ");
-            return `<option value="${esc(lc.chave)}" title="${esc(lc.cupom)} — ${esc(nomes)}">${esc(lc.cupom)}</option>`;
-          }).join("")}
-        </select>
-      </div>
-      <div class="field" style="margin-bottom:0"><label>Tipo de parceiro</label>
-        <select class="input select-compact" id="f-tipo">
-          <option value="">Todos os tipos</option>
-          ${(listas.tipoNegocio || []).map((t) => `<option value="${esc(t.valor)}">${esc(t.valor)}</option>`).join("")}
-        </select>
-      </div>
-    </div>
     <div class="muted" id="comparacao-nota" style="font-size:12px;margin-bottom:18px"></div>
 
     <div class="stat-grid" id="resumo"></div>
+    <div class="stat-grid" id="resumo-desconto"></div>
 
     <section class="section">
       <div class="section-head"><h2>Desempenho por cupom no período</h2></div>
@@ -107,12 +101,13 @@ export async function renderDashboard(app) {
       <div class="dash-cols" style="display:grid;grid-template-columns:1.6fr 1fr;gap:20px;margin-bottom:20px;align-items:start">
         <div class="chart-card">
           <div class="chart-card-head">
-            <h3>Faturamento por semana <span class="muted" style="font-size:11px;font-weight:600">— todos os cupons, no período selecionado</span></h3>
+            <h3>Faturamento com cupons <span class="muted" style="font-size:11px;font-weight:600">— histórico completo</span></h3>
             <button class="chart-toggle" id="toggle-mes" type="button">Ver tabela</button>
           </div>
+          ${controlesGraficoCupomHtml("fat")}
           <div id="chart-mes"></div>
           <table class="chart-table" id="tabela-mes">
-            <thead><tr><th>Semana</th><th>Faturamento via cupom</th></tr></thead>
+            <thead><tr><th>Período</th><th>Faturamento via cupom</th></tr></thead>
             <tbody id="tabela-mes-body"></tbody>
           </table>
         </div>
@@ -125,12 +120,32 @@ export async function renderDashboard(app) {
 
       <div class="dash-cols" style="display:grid;grid-template-columns:1.6fr 1fr;gap:20px;margin-bottom:20px;align-items:start">
         <div class="chart-card">
-          <h3>Evolução do uso de cupons <span class="muted" style="font-size:11px;font-weight:600">— todos os cupons, no período selecionado</span></h3>
+          <h3>Uso de Cupons <span class="muted" style="font-size:11px;font-weight:600">— histórico completo</span></h3>
+          ${controlesGraficoCupomHtml("uso")}
           <div id="chart-uso"></div>
         </div>
         <div class="chart-card">
           <h3 style="margin-bottom:14px">Participação por cupom no período</h3>
           <div id="participacao"></div>
+        </div>
+      </div>
+
+      <div class="dash-cols" style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px;align-items:start">
+        <div class="chart-card">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:2px">
+            <h3 style="margin-bottom:0" id="tendencias-retidos-titulo">Tendências — Retidos</h3>
+            <div class="filter-row" id="toggle-retidos-perdidos" style="margin-bottom:0">
+              <button class="chip chip-sm active" data-modo="retidos">Retidos</button>
+              <button class="chip chip-sm" data-modo="perdidos">Perdidos</button>
+            </div>
+          </div>
+          <div class="muted" style="font-size:11.5px;margin-bottom:12px" id="tendencias-retidos-desc"></div>
+          <div id="tendencias-retidos"></div>
+        </div>
+        <div class="chart-card">
+          <h3 style="margin-bottom:2px">Tendências — Novos</h3>
+          <div class="muted" style="font-size:11.5px;margin-bottom:12px">Cupons usados pela primeira vez no período.<br>1: Cupons com 50% no período selecionado.<br>2: Cupons com 50% no período anterior.</div>
+          <div id="tendencias-novos"></div>
         </div>
       </div>
 
@@ -178,40 +193,46 @@ export async function renderDashboard(app) {
     return {
       de: app.querySelector("#f-de").value,
       ate: app.querySelector("#f-ate").value,
-      cupomChave: app.querySelector("#f-cupom").value,
-      tipo: app.querySelector("#f-tipo").value,
     };
   }
 
   function atualizarPeriodo() {
-    const { de, ate, cupomChave, tipo } = lerFiltros();
-    const dims = { cupomChave, tipo };
+    const { de, ate } = lerFiltros();
     const comparavel = Boolean(de && ate);
     const [deAnt, ateAnt] = comparavel ? periodoAnterior(de, ate) : ["", ""];
 
-    const doPeriodo = filtrarTudo(lancamentos, porId, chavePorParceiroId, { de, ate, ...dims });
-    const doPeriodoAnterior = comparavel ? filtrarTudo(lancamentos, porId, chavePorParceiroId, { de: deAnt, ate: ateAnt, ...dims }) : [];
+    const lancamentosTipo = filtroTipo === "Todos" ? lancamentos : lancamentos.filter((l) => porId[l.parceiroId]?.tipo === filtroTipo);
+    const primeiraDataCupom = primeiraDataPorCupom(lancamentosTipo, chavePorParceiroId);
+
+    const doPeriodo = filtrarPeriodo(lancamentosTipo, de, ate);
+    const doPeriodoAnterior = comparavel ? filtrarPeriodo(lancamentosTipo, deAnt, ateAnt) : [];
 
     app.querySelector("#comparacao-nota").textContent = comparavel
       ? `Comparado com o período imediatamente anterior de mesma duração (${formatDataBRlocal(deAnt)} – ${formatDataBRlocal(ateAnt)}).`
       : `Selecione um período (De/Até) para comparar com o período anterior.`;
 
-    desenharResumo(app, doPeriodo, doPeriodoAnterior, comparavel);
+    const kpisDesconto = calcularKpisDesconto(doPeriodo, de, ate, porId, porIdGrupo, chavePorParceiroId, primeiraDataCupom, porChave);
+    desenharResumo(app, doPeriodo, doPeriodoAnterior, comparavel, kpisDesconto);
     desenharDonutCupom(app, doPeriodo);
-    desenharRanking(app, doPeriodo, chavePorParceiroId, porChave);
-    desenharRankingUsos(app, doPeriodo, chavePorParceiroId, porChave);
+    desenharRanking(app, doPeriodo, chavePorParceiroId, porChave, grupos);
+    desenharRankingUsos(app, doPeriodo, chavePorParceiroId, porChave, grupos);
     desenharParticipacao(app, doPeriodo, chavePorParceiroId, porChave);
+    desenharTendencias(app, doPeriodo, doPeriodoAnterior, comparavel, chavePorParceiroId, porChave, primeiraDataCupom, deAnt, ateAnt, modoRetidos, grupos, porId, porIdGrupo);
 
-    // gráficos "por semana": sempre o total de todos os cupons (não
-    // filtram por Cupom/Tipo — ver desenharChartMes/desenharChartUsoMensal),
-    // e sempre mostram TODA semana do período selecionado, mesmo sem
-    // lançamento (fica em zero) — ver semanasNoPeriodo. Sem De/Até
-    // selecionado ("Tudo"), usa o intervalo real dos dados como limite.
-    const [deSemanas, ateSemanas] = limitesEfetivos(lancamentos, de, ate);
-    const semanas = semanasNoPeriodo(deSemanas, ateSemanas);
-    const lancamentosNoPeriodoTotal = filtrarPeriodo(lancamentos, deSemanas, ateSemanas);
-    desenharChartUsoMensal(app, lancamentosNoPeriodoTotal, semanas);
-    desenharChartMes(app, lancamentosNoPeriodoTotal, semanas);
+    // gráficos "por cupom" (Faturamento com cupons / Uso de Cupons): sempre
+    // o histórico completo, independente do período selecionado no topo
+    // (ver desenharGraficoCupons) — só reagem aos próprios toggles de
+    // desconto (20%/50%/Ambos) e granularidade (Semana/Mês).
+    desenharGraficoCupons(app, {
+      containerId: "chart-uso", tabelaBodyId: null,
+      lancamentosTotais: lancamentosTipo, porId, porIdGrupo, campo: "quantidadeUso",
+      estado: graficoUsoState, formatValue: (v) => `${Math.round(v)} usos`, formatAxis: formatCompactNumero,
+    });
+    desenharGraficoCupons(app, {
+      containerId: "chart-mes", tabelaBodyId: "tabela-mes-body",
+      lancamentosTotais: lancamentosTipo, porId, porIdGrupo, campo: "faturamentoCupom",
+      estado: graficoFatState, formatValue: formatMoeda, formatAxis: formatCompact,
+    });
 
     linhasRanking = calcularLinhasRanking(doPeriodo, doPeriodoAnterior, chavePorParceiroId, porChave, comparavel);
     desenharTabela();
@@ -235,36 +256,35 @@ export async function renderDashboard(app) {
     });
   }
 
+  app.querySelector("#toggle-retidos-perdidos").addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-modo]");
+    if (!btn) return;
+    modoRetidos = btn.dataset.modo;
+    app.querySelectorAll("#toggle-retidos-perdidos .chip").forEach((c) => c.classList.toggle("active", c === btn));
+    atualizarPeriodo();
+  });
+
   app.querySelector("#presets").addEventListener("click", (e) => {
     const btn = e.target.closest("[data-preset]");
     if (!btn) return;
     app.querySelectorAll("[data-preset]").forEach((b) => b.classList.toggle("active", b === btn));
-    const selMes = app.querySelector("#f-mes");
-    if (selMes) selMes.value = "";
     const [de, ate] = presetRange(btn.dataset.preset);
     app.querySelector("#f-de").value = de;
     app.querySelector("#f-ate").value = ate;
     atualizarPeriodo();
   });
-  app.querySelector("#f-mes")?.addEventListener("change", (e) => {
-    const mes = e.target.value;
-    if (!mes) return;
-    app.querySelectorAll("[data-preset]").forEach((b) => b.classList.remove("active"));
-    app.querySelector("#f-de").value = `${mes}-01`;
-    app.querySelector("#f-ate").value = ultimoDiaMes(mes);
+  app.querySelector("#f-tipo").addEventListener("change", (e) => {
+    filtroTipo = e.target.value;
     atualizarPeriodo();
   });
   ["#f-de", "#f-ate"].forEach((sel) => {
     app.querySelector(sel).addEventListener("change", () => {
       app.querySelectorAll("[data-preset]").forEach((b) => b.classList.remove("active"));
-      const selMes = app.querySelector("#f-mes");
-      if (selMes) selMes.value = "";
       atualizarPeriodo();
     });
   });
-  ["#f-cupom", "#f-tipo"].forEach((sel) => {
-    app.querySelector(sel).addEventListener("change", atualizarPeriodo);
-  });
+  wireControlesGraficoCupom(app, "fat", graficoFatState, atualizarPeriodo);
+  wireControlesGraficoCupom(app, "uso", graficoUsoState, atualizarPeriodo);
   atualizarPeriodo();
 
   /* ---- tabela: busca, ordenação, drill-down ---- */
@@ -382,37 +402,100 @@ function semanasNoPeriodo(de, ate) {
   }
   return semanas;
 }
+function proximoMesISO(chave) {
+  const [y, m] = chave.split("-").map(Number);
+  const novoMes = m === 12 ? 1 : m + 1;
+  const novoAno = m === 12 ? y + 1 : y;
+  return `${novoAno}-${String(novoMes).padStart(2, "0")}`;
+}
+// todo mês entre o mês de `de` e o mês de `ate`, inclusive — mesma ideia
+// de semanasNoPeriodo, mas por mês (usado quando a granularidade do
+// gráfico é "Mês").
+function mesesNoPeriodo(de, ate) {
+  if (!de || !ate) return [];
+  const ultimo = chaveMes(ate);
+  const meses = [];
+  let cursor = chaveMes(de);
+  let guarda = 0;
+  while (cursor <= ultimo && guarda++ < 500) {
+    meses.push(cursor);
+    cursor = proximoMesISO(cursor);
+  }
+  return meses;
+}
+
+/* ---------- desconto 20%/50%: classificação por lançamento ----------
+   Não existe registro histórico de qual desconto valia quando cada uso
+   aconteceu — descontoAtual() (js/util/cupom.js) só sabe responder "hoje".
+   Por isso, aqui, um lançamento conta como "50%" se a DATA DELE cai
+   dentro do período (inicio–fim) configurado no grupo do cupom — mais
+   fiel ao histórico do que aplicar a config atual pra tudo. Um cupom
+   pode aparecer nos dois grupos (20% e 50%) num mesmo período, se teve
+   lançamentos dos dois lados — é esperado, não é bug. */
+function cupomEhEspecial(lancamento, parceiro, porIdGrupo) {
+  if (!parceiro) return false;
+  const g = porIdGrupo[String(parceiro.grupoCupom || "")];
+  if (!g || !g.inicio || !g.fim) return false;
+  return lancamentoNoPeriodo(lancamento, g.inicio, g.fim);
+}
+function filtrarPorTier(lancamentos, porId, porIdGrupo, tier) {
+  if (tier === "ambos") return lancamentos;
+  return lancamentos.filter((l) => {
+    const especial = cupomEhEspecial(l, porId[l.parceiroId], porIdGrupo);
+    return tier === "50" ? especial : !especial;
+  });
+}
+// primeira data (ISO) em que cada cupom (chave) teve algum lançamento,
+// olhando TODA a história — usado pro KPI "novos cupons" e por Tendências.
+function primeiraDataPorCupom(todosLancamentos, chavePorParceiroId) {
+  const mapa = new Map();
+  for (const l of todosLancamentos) {
+    if (!l.parceiroId || !l.dataInicio) continue;
+    const chave = chavePorParceiroId[l.parceiroId];
+    if (!chave) continue;
+    const atual = mapa.get(chave);
+    if (!atual || l.dataInicio < atual) mapa.set(chave, l.dataInicio);
+  }
+  return mapa;
+}
+// além da contagem de cupons por faixa, guarda quantos usos cada cupom
+// teve em cada faixa — usado no tooltip das KPIs "Cupons usados a X%"
+// (ver desenharResumo/wireStatTooltips).
+function calcularKpisDesconto(doPeriodo, de, ate, porId, porIdGrupo, chavePorParceiroId, primeiraDataCupom, porChave) {
+  const usos50 = new Map(), usos20 = new Map(), usosTotal = new Map();
+  for (const l of doPeriodo) {
+    if (!l.parceiroId) continue;
+    const chave = chavePorParceiroId[l.parceiroId];
+    if (!chave) continue;
+    usosTotal.set(chave, (usosTotal.get(chave) || 0) + l.quantidadeUso);
+    const mapa = cupomEhEspecial(l, porId[l.parceiroId], porIdGrupo) ? usos50 : usos20;
+    mapa.set(chave, (mapa.get(chave) || 0) + l.quantidadeUso);
+  }
+  // "novos" só faz sentido com um período delimitado — sem De/Até
+  // ("Tudo") qualquer cupom pareceria "novo" por falta de limite.
+  const chavesNovas = de && ate
+    ? [...usosTotal.keys()].filter((chave) => (primeiraDataCupom.get(chave) || "") >= de)
+    : [];
+  const novos = de && ate ? chavesNovas.length : null;
+  const detalhes = (chaves, mapaUso) => chaves
+    .map((chave) => ({ cupom: porChave[chave]?.cupom || chave, uso: mapaUso.get(chave) || 0 }))
+    .sort((a, b) => b.uso - a.uso);
+  return {
+    cupons50: usos50.size, cupons20: usos20.size, novos,
+    detalhes50: detalhes([...usos50.keys()], usos50),
+    detalhes20: detalhes([...usos20.keys()], usos20),
+    detalhesNovos: detalhes(chavesNovas, usosTotal),
+  };
+}
+
 function formatDataBRlocal(iso) {
   if (!iso || !/^\d{4}-\d{2}-\d{2}/.test(iso)) return "—";
   const [y, m, d] = iso.slice(0, 10).split("-");
   return `${d}/${m}/${y}`;
 }
-// "jun/2025" — usado na guia de meses com dados (ano completo, diferente de mesLabel do eixo dos gráficos)
-function mesLabelLongo(m) {
-  const [y, mo] = m.split("-");
-  return `${MES_NOMES[parseInt(mo, 10) - 1]}/${y}`;
-}
-function ultimoDiaMes(mesStr) {
-  const [y, m] = mesStr.split("-").map(Number);
-  return `${mesStr}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
-}
-
 /* ---------- agregações ---------- */
 function filtrarPeriodo(lancamentos, de, ate) {
   return lancamentos.filter((l) => lancamentoNoPeriodo(l, de, ate));
-}
-function filtrarDimensoes(lancamentos, porId, chavePorParceiroId, { cupomChave, tipo }) {
-  if (!cupomChave && !tipo) return lancamentos;
-  return lancamentos.filter((l) => {
-    const p = porId[l.parceiroId];
-    if (!p) return false;
-    if (cupomChave && chavePorParceiroId[l.parceiroId] !== cupomChave) return false;
-    if (tipo && p.tipo !== tipo) return false;
-    return true;
-  });
-}
-function filtrarTudo(lancamentos, porId, chavePorParceiroId, { de, ate, cupomChave, tipo }) {
-  return filtrarDimensoes(filtrarPeriodo(lancamentos, de, ate), porId, chavePorParceiroId, { cupomChave, tipo });
 }
 // agrega lançamentos pelo código de cupom (consolidado) em vez de por
 // parceiro individual — cupons compartilhados por mais de uma empresa
@@ -469,7 +552,7 @@ function calcularResumo(lista) {
   const ticketMedio = totalUso > 0 ? totalCupom / totalUso : 0;
   return { totalUso, totalCupom, totalGeral, pctCupom, ticketMedio };
 }
-function desenharResumo(app, doPeriodo, doPeriodoAnterior, comparavel) {
+function desenharResumo(app, doPeriodo, doPeriodoAnterior, comparavel, kpisDesconto) {
   const atual = calcularResumo(doPeriodo);
   const anterior = calcularResumo(doPeriodoAnterior);
   const d = (a, b) => (comparavel ? pctDelta(a, b) : undefined);
@@ -478,12 +561,50 @@ function desenharResumo(app, doPeriodo, doPeriodoAnterior, comparavel) {
     stat(formatMoeda(atual.totalGeral), "Faturamento total", d(atual.totalGeral, anterior.totalGeral)),
     stat(formatMoeda(atual.totalCupom), "Faturamento via cupom", d(atual.totalCupom, anterior.totalCupom)),
     stat(`${atual.pctCupom.toFixed(1)}%`, "Cupom sobre faturamento total", d(atual.pctCupom, anterior.pctCupom)),
-    stat(atual.totalUso, "Usos de cupom", d(atual.totalUso, anterior.totalUso)),
     stat(formatMoeda(atual.ticketMedio), "Ticket médio", d(atual.ticketMedio, anterior.ticketMedio)),
   ].join("");
+
+  app.querySelector("#resumo-desconto").innerHTML = [
+    stat(atual.totalUso, "Usos de cupom", d(atual.totalUso, anterior.totalUso)),
+    stat(kpisDesconto.novos === null ? "—" : kpisDesconto.novos, "Novos cupons utilizados no período", undefined, "novos"),
+    stat(kpisDesconto.cupons50, "Cupons usados a 50%", undefined, "50"),
+    stat(kpisDesconto.cupons20, "Cupons usados a 20%", undefined, "20"),
+  ].join("");
+
+  wireStatTooltips(app, { novos: kpisDesconto.detalhesNovos, 50: kpisDesconto.detalhes50, 20: kpisDesconto.detalhes20 });
 }
-function stat(num, label, delta) {
-  return `<div class="stat"><div class="stat-num">${num}</div><div class="stat-label">${esc(label)}</div>${deltaBadgeHtml(delta)}</div>`;
+function stat(num, label, delta, tipId) {
+  return `<div class="stat"${tipId ? ` data-stat-tip="${tipId}" tabindex="0"` : ""}><div class="stat-num">${num}</div><div class="stat-label">${esc(label)}</div>${deltaBadgeHtml(delta)}</div>`;
+}
+/* Hover (ou foco via teclado) nas KPIs "Cupons usados a X%" mostra
+   quantos usos cada cupom daquela faixa teve no período — reaproveita
+   o mesmo componente de tooltip dos gráficos (.viz-tooltip, #viz-tip). */
+function wireStatTooltips(app, detalhesPorId) {
+  const tip = app.querySelector("#viz-tip");
+  app.querySelectorAll("[data-stat-tip]").forEach((el) => {
+    const detalhes = detalhesPorId[el.dataset.statTip] || [];
+    function mostrar() {
+      tip.innerHTML = "";
+      if (!detalhes.length) {
+        tip.textContent = "Nenhum cupom nesse período.";
+      } else {
+        detalhes.forEach((d) => {
+          const linha = document.createElement("div");
+          linha.textContent = `${d.cupom}: ${d.uso} uso${d.uso === 1 ? "" : "s"}`;
+          tip.appendChild(linha);
+        });
+      }
+      const r = el.getBoundingClientRect();
+      tip.style.left = `${r.left + r.width / 2}px`;
+      tip.style.top = `${r.top}px`;
+      tip.classList.add("show");
+    }
+    function esconder() { tip.classList.remove("show"); }
+    el.addEventListener("mouseenter", mostrar);
+    el.addEventListener("mouseleave", esconder);
+    el.addEventListener("focus", mostrar);
+    el.addEventListener("blur", esconder);
+  });
 }
 
 /* ---------- render: rosca (donut) — cupom + delivery vs faturamento total ---------- */
@@ -523,8 +644,16 @@ function donutSVG(pctCupom, pctDelivery) {
   </svg>`;
 }
 
+// classe de destaque do rótulo do cupom quando ele está, HOJE, no
+// período de 50% (ver util/cupom.js:cupomEm50) — usada em todos os
+// lugares do Dashboard que mostram o código do cupom como rótulo
+function labelClass50(linha, grupos) {
+  const rep = linha?.parceiros?.[0];
+  return rep && cupomEm50(rep, grupos) ? " cupom-codigo--50" : "";
+}
+
 /* ---------- render: ranking por cupom (barras horizontais) ---------- */
-function desenharRanking(app, doPeriodo, chavePorParceiroId, porChave) {
+function desenharRanking(app, doPeriodo, chavePorParceiroId, porChave, grupos) {
   const agregados = agregarPorCupom(doPeriodo, chavePorParceiroId);
   const linhas = [...agregados.entries()]
     .map(([chave, a]) => ({ linha: porChave[chave], uso: a.uso, fat: a.fatCupom }))
@@ -540,7 +669,7 @@ function desenharRanking(app, doPeriodo, chavePorParceiroId, porChave) {
   const max = Math.max(...linhas.map((l) => l.fat));
   container.innerHTML = linhas.map((l) => `
     <div class="viz-bar-row" data-id="${esc(l.linha.parceiros[0].id)}" tabindex="0" role="img" aria-label="${esc(l.linha.cupom)}: ${esc(formatMoeda(l.fat))}, ${l.uso} usos">
-      <div class="viz-bar-label" title="${esc(l.linha.cupom)} — ${esc(l.linha.parceiros.map((p) => p.nome).join(", "))}">${esc(l.linha.cupom)}</div>
+      <div class="viz-bar-label${labelClass50(l.linha, grupos)}" title="${esc(l.linha.cupom)} — ${esc(l.linha.parceiros.map((p) => p.nome).join(", "))}">${esc(l.linha.cupom)}</div>
       <div class="viz-bar-track"><div class="viz-bar-fill" style="width:${Math.max(2, Math.round((l.fat / max) * 100))}%"></div></div>
       <div class="viz-bar-val">${esc(formatMoeda(l.fat))}</div>
     </div>
@@ -549,7 +678,7 @@ function desenharRanking(app, doPeriodo, chavePorParceiroId, porChave) {
 }
 
 /* ---------- render: ranking por usos (barras horizontais) ---------- */
-function desenharRankingUsos(app, doPeriodo, chavePorParceiroId, porChave) {
+function desenharRankingUsos(app, doPeriodo, chavePorParceiroId, porChave, grupos) {
   const agregados = agregarPorCupom(doPeriodo, chavePorParceiroId);
   const linhas = [...agregados.entries()]
     .map(([chave, a]) => ({ linha: porChave[chave], uso: a.uso, fat: a.fatCupom }))
@@ -565,7 +694,7 @@ function desenharRankingUsos(app, doPeriodo, chavePorParceiroId, porChave) {
   const max = Math.max(...linhas.map((l) => l.uso));
   container.innerHTML = linhas.map((l) => `
     <div class="viz-bar-row" data-id="${esc(l.linha.parceiros[0].id)}" tabindex="0" role="img" aria-label="${esc(l.linha.cupom)}: ${l.uso} usos">
-      <div class="viz-bar-label" title="${esc(l.linha.cupom)} — ${esc(l.linha.parceiros.map((p) => p.nome).join(", "))}">${esc(l.linha.cupom)}</div>
+      <div class="viz-bar-label${labelClass50(l.linha, grupos)}" title="${esc(l.linha.cupom)} — ${esc(l.linha.parceiros.map((p) => p.nome).join(", "))}">${esc(l.linha.cupom)}</div>
       <div class="viz-bar-track"><div class="viz-bar-fill" style="width:${Math.max(2, Math.round((l.uso / max) * 100))}%"></div></div>
       <div class="viz-bar-val">${l.uso}</div>
     </div>
@@ -580,6 +709,103 @@ function wireBarDrillDown(container) {
       if (e.key === "Enter" || e.key === " ") { e.preventDefault(); location.hash = `#/parceiro/${row.dataset.id}`; }
     });
   });
+}
+
+/* ---------- render: Tendências — retidos/perdidos (uso nos dois
+   períodos) vs novos que merecem atenção (uso só no período atual).
+   Compara sempre o período selecionado com o imediatamente anterior de
+   mesma duração (periodoAnterior, já usado pros deltas dos KPIs).
+
+   "Retidos" e "Perdidos" partem do mesmo cohort — cupons que já
+   apareceram como "Novos" no período anterior (primeiro uso deles caiu
+   dentro de [deAnt, ateAnt], via primeiraDataCupom) — e respondem "desse
+   cohort, quem continuou usando (retidos) e quem parou (perdidos)?".
+   "Perdidos" mostra o faturamento que o cupom tinha no período anterior
+   (não no atual, onde por definição ele não teve uso). Cada linha de
+   "Perdidos"/"Novos" ganha marcadores sobrescritos ¹/² conforme o cupom
+   teve algum uso dentro do período de 50% do grupo (cupomEhEspecial,
+   mesmo critério do resto do Dashboard) no período selecionado (¹) e/ou
+   no período anterior (²). */
+function calcularTendencias(doPeriodo, doPeriodoAnterior, chavePorParceiroId, porChave, primeiraDataCupom, deAnt, ateAnt, porId, porIdGrupo) {
+  const atualChaves = new Set();
+  const fatAtualPorChave = new Map();
+  const especialAtualPorChave = new Set();
+  for (const l of doPeriodo) {
+    const chave = chavePorParceiroId[l.parceiroId];
+    if (!chave) continue;
+    if (l.quantidadeUso > 0) atualChaves.add(chave);
+    fatAtualPorChave.set(chave, (fatAtualPorChave.get(chave) || 0) + l.faturamentoCupom);
+    if (cupomEhEspecial(l, porId[l.parceiroId], porIdGrupo)) especialAtualPorChave.add(chave);
+  }
+  const anteriorChaves = new Set();
+  const fatAnteriorPorChave = new Map();
+  const especialAnteriorPorChave = new Set();
+  for (const l of doPeriodoAnterior) {
+    const chave = chavePorParceiroId[l.parceiroId];
+    if (!chave) continue;
+    if (l.quantidadeUso > 0) anteriorChaves.add(chave);
+    fatAnteriorPorChave.set(chave, (fatAnteriorPorChave.get(chave) || 0) + l.faturamentoCupom);
+    if (cupomEhEspecial(l, porId[l.parceiroId], porIdGrupo)) especialAnteriorPorChave.add(chave);
+  }
+  const eraNovoNoAnterior = (chave) => {
+    const primeira = primeiraDataCupom.get(chave);
+    return !!primeira && !!deAnt && !!ateAnt && primeira >= deAnt && primeira <= ateAnt;
+  };
+  const linha = (chave, fatPorChave) => ({
+    linha: porChave[chave], fat: fatPorChave.get(chave) || 0,
+    marc50Atual: especialAtualPorChave.has(chave), marc50Anterior: especialAnteriorPorChave.has(chave),
+  });
+  const retidos = [...anteriorChaves]
+    .filter((c) => eraNovoNoAnterior(c) && atualChaves.has(c))
+    .map((c) => linha(c, fatAtualPorChave)).filter((l) => l.linha).sort((a, b) => b.fat - a.fat);
+  const perdidos = [...anteriorChaves]
+    .filter((c) => !atualChaves.has(c))
+    .map((c) => linha(c, fatAnteriorPorChave)).filter((l) => l.linha).sort((a, b) => b.fat - a.fat);
+  const novos = [...atualChaves].filter((c) => !anteriorChaves.has(c))
+    .map((c) => linha(c, fatAtualPorChave)).filter((l) => l.linha).sort((a, b) => b.fat - a.fat);
+  return { retidos, perdidos, novos };
+}
+function marcadores50Html(l) {
+  let out = "";
+  if (l.marc50Atual) out += `<sup title="Com desconto de 50% no período selecionado">1</sup>`;
+  if (l.marc50Anterior) out += `<sup title="Com desconto de 50% no período anterior">2</sup>`;
+  return out;
+}
+function listaTendenciaHtml(linhas, vazioTexto, grupos, mostrarMarcadores) {
+  if (!linhas.length) return `<div class="empty">${esc(vazioTexto)}</div>`;
+  const max = Math.max(...linhas.map((l) => l.fat), 1);
+  return linhas.map((l) => `
+    <div class="viz-bar-row" data-id="${esc(l.linha.parceiros[0].id)}" tabindex="0" role="img" aria-label="${esc(l.linha.cupom)}: ${esc(formatMoeda(l.fat))}">
+      <div class="viz-bar-label${labelClass50(l.linha, grupos)}" title="${esc(l.linha.cupom)} — ${esc(l.linha.parceiros.map((p) => p.nome).join(", "))}">${esc(l.linha.cupom)}${mostrarMarcadores ? marcadores50Html(l) : ""}</div>
+      <div class="viz-bar-track"><div class="viz-bar-fill" style="width:${Math.max(2, Math.round((l.fat / max) * 100))}%"></div></div>
+      <div class="viz-bar-val">${esc(formatMoeda(l.fat))}</div>
+    </div>
+  `).join("");
+}
+function desenharTendencias(app, doPeriodo, doPeriodoAnterior, comparavel, chavePorParceiroId, porChave, primeiraDataCupom, deAnt, ateAnt, modoRetidos, grupos, porId, porIdGrupo) {
+  const elRetidos = app.querySelector("#tendencias-retidos");
+  const elNovos = app.querySelector("#tendencias-novos");
+  const tituloEl = app.querySelector("#tendencias-retidos-titulo");
+  const descEl = app.querySelector("#tendencias-retidos-desc");
+  if (!comparavel) {
+    const aviso = `<div class="empty">Selecione um período (De/Até) pra ver tendências.</div>`;
+    elRetidos.innerHTML = aviso;
+    elNovos.innerHTML = aviso;
+    return;
+  }
+  const { retidos, perdidos, novos } = calcularTendencias(doPeriodo, doPeriodoAnterior, chavePorParceiroId, porChave, primeiraDataCupom, deAnt, ateAnt, porId, porIdGrupo);
+  if (modoRetidos === "perdidos") {
+    tituloEl.textContent = "Tendências — Perdidos";
+    descEl.innerHTML = "Cupons usados no período anterior e não usados neste;<br>1: Cupons com 50% no período selecionado.<br>2: Cupons com 50% no período anterior.";
+    elRetidos.innerHTML = listaTendenciaHtml(perdidos, "Nenhum cupom perdido nesse período.", grupos, true);
+  } else {
+    tituloEl.textContent = "Tendências — Retidos";
+    descEl.textContent = "Cupons novos no período anterior que continuaram sendo usados neste";
+    elRetidos.innerHTML = listaTendenciaHtml(retidos, "Nenhum cupom retido nesse período.", grupos, false);
+  }
+  elNovos.innerHTML = listaTendenciaHtml(novos, "Nenhum cupom novo nesse período.", grupos, true);
+  wireBarDrillDown(elRetidos);
+  wireBarDrillDown(elNovos);
 }
 
 /* ---------- render: participação por cupom (barra empilhada + legenda) ---------- */
@@ -672,56 +898,84 @@ function tabelaRowHtml(l) {
   </tr>`;
 }
 
-/* ---------- render: linha (SVG) — genérico, usado por faturamento/mês e ticket médio ---------- */
-function desenharChartMes(app, lancamentosPeriodo, semanas) {
-  const porSemana = new Map();
-  for (const l of lancamentosPeriodo) {
-    if (!l.dataInicio) continue;
-    const semana = chaveSemana(l.dataInicio);
-    porSemana.set(semana, (porSemana.get(semana) || 0) + l.faturamentoCupom);
-  }
-  const pontos = semanas.map((s) => ({ label: rotuloSemanaCurto(s), value: porSemana.get(s) || 0 }));
-
-  const container = app.querySelector("#chart-mes");
-  const tabelaBody = app.querySelector("#tabela-mes-body");
-
-  if (!pontos.length) {
-    container.innerHTML = `<div class="empty">Sem lançamentos ainda.</div>`;
-    tabelaBody.innerHTML = "";
-    return;
-  }
-
-  container.innerHTML = lineChartSVG(pontos, formatMoeda);
-  wireLineChartHover(container, pontos, formatMoeda);
-
-  tabelaBody.innerHTML = "";
-  pontos.forEach((p) => {
-    const tr = document.createElement("tr");
-    const tdLabel = document.createElement("td");
-    tdLabel.textContent = p.label;
-    const tdValor = document.createElement("td");
-    tdValor.textContent = formatMoeda(p.value);
-    tr.append(tdLabel, tdValor);
-    tabelaBody.appendChild(tr);
+/* ---------- render: chips de controle (20%/50%/Ambos + Semana/Mês) dos
+   dois gráficos "por cupom" (Faturamento com cupons / Uso de Cupons) ---------- */
+function controlesGraficoCupomHtml(prefixo) {
+  return `
+    <div style="display:flex; gap:14px; flex-wrap:wrap; margin-bottom:12px">
+      <div class="filter-row" data-cupom-tier="${prefixo}" style="margin-bottom:0">
+        <button class="chip chip-sm active" data-tier="ambos">Ambos</button>
+        <button class="chip chip-sm" data-tier="20">20%</button>
+        <button class="chip chip-sm" data-tier="50">50%</button>
+      </div>
+      <div class="filter-row" data-cupom-gran="${prefixo}" style="margin-bottom:0">
+        <button class="chip chip-sm active" data-gran="semana">Semana</button>
+        <button class="chip chip-sm" data-gran="mes">Mês</button>
+      </div>
+    </div>
+  `;
+}
+function wireControlesGraficoCupom(app, prefixo, estado, redesenhar) {
+  app.querySelector(`[data-cupom-tier="${prefixo}"]`).addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-tier]");
+    if (!btn) return;
+    estado.tier = btn.dataset.tier;
+    app.querySelectorAll(`[data-cupom-tier="${prefixo}"] .chip`).forEach((c) => c.classList.toggle("active", c === btn));
+    redesenhar();
+  });
+  app.querySelector(`[data-cupom-gran="${prefixo}"]`).addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-gran]");
+    if (!btn) return;
+    estado.granularidade = btn.dataset.gran;
+    app.querySelectorAll(`[data-cupom-gran="${prefixo}"] .chip`).forEach((c) => c.classList.toggle("active", c === btn));
+    redesenhar();
   });
 }
-function desenharChartUsoMensal(app, lancamentosPeriodo, semanas) {
-  const porSemana = new Map();
-  for (const l of lancamentosPeriodo) {
-    if (!l.dataInicio) continue;
-    const semana = chaveSemana(l.dataInicio);
-    porSemana.set(semana, (porSemana.get(semana) || 0) + l.quantidadeUso);
-  }
-  const pontos = semanas.map((s) => ({ label: rotuloSemanaCurto(s), value: porSemana.get(s) || 0 }));
 
-  const container = app.querySelector("#chart-uso");
+/* ---------- render: linha (SVG) — genérico, usado pelos dois gráficos
+   "por cupom" (Faturamento com cupons / Uso de Cupons). Sempre histórico
+   completo (limitesEfetivos com de/ate vazios), filtrado por tier
+   (20%/50%/Ambos — ver cupomEhEspecial) e agrupado por semana ou mês
+   conforme o estado de granularidade. ---------- */
+function desenharGraficoCupons(app, opts) {
+  const { containerId, tabelaBodyId, lancamentosTotais, porId, porIdGrupo, campo, estado, formatValue, formatAxis } = opts;
+  const filtrados = filtrarPorTier(lancamentosTotais, porId, porIdGrupo, estado.tier);
+  const [de, ate] = limitesEfetivos(lancamentosTotais, "", "");
+
+  const porChaveTempo = new Map();
+  for (const l of filtrados) {
+    if (!l.dataInicio) continue;
+    const chave = estado.granularidade === "mes" ? chaveMes(l.dataInicio) : chaveSemana(l.dataInicio);
+    porChaveTempo.set(chave, (porChaveTempo.get(chave) || 0) + l[campo]);
+  }
+  const chaves = estado.granularidade === "mes" ? mesesNoPeriodo(de, ate) : semanasNoPeriodo(de, ate);
+  const rotulo = estado.granularidade === "mes" ? rotuloMesCurto : rotuloSemanaCurto;
+  const pontos = chaves.map((c) => ({ label: rotulo(c), value: porChaveTempo.get(c) || 0 }));
+
+  const container = app.querySelector(`#${containerId}`);
+  const tabelaBody = tabelaBodyId ? app.querySelector(`#${tabelaBodyId}`) : null;
+
   if (!pontos.length) {
     container.innerHTML = `<div class="empty">Sem lançamentos ainda.</div>`;
+    if (tabelaBody) tabelaBody.innerHTML = "";
     return;
   }
-  const formatUso = (v) => `${Math.round(v)} usos`;
-  container.innerHTML = lineChartSVG(pontos, formatUso, formatCompactNumero);
-  wireLineChartHover(container, pontos, formatUso);
+
+  container.innerHTML = lineChartSVG(pontos, formatValue, formatAxis);
+  wireLineChartHover(container, pontos, formatValue);
+
+  if (tabelaBody) {
+    tabelaBody.innerHTML = "";
+    pontos.forEach((p) => {
+      const tr = document.createElement("tr");
+      const tdLabel = document.createElement("td");
+      tdLabel.textContent = p.label;
+      const tdValor = document.createElement("td");
+      tdValor.textContent = formatValue(p.value);
+      tr.append(tdLabel, tdValor);
+      tabelaBody.appendChild(tr);
+    });
+  }
 }
 function formatCompactNumero(v) {
   if (Math.abs(v) >= 1000) return (v / 1000).toFixed(v % 1000 === 0 ? 0 : 1) + "K";

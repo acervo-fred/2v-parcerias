@@ -62,11 +62,35 @@ export async function renderLancamentos(app) {
       </select>
     </div>
 
-    <div class="list-card" id="lista"></div>
+    <div class="chart-card" style="padding:0">
+      <table class="rank-table" id="tabela-lancamentos">
+        <thead>
+          <tr>
+            <th data-sort="nome">Nome</th>
+            <th data-sort="data">Data</th>
+            <th data-sort="usos" class="num">Usos</th>
+            <th class="num">Valores</th>
+            <th class="edit-only"></th>
+          </tr>
+        </thead>
+        <tbody id="lista"></tbody>
+      </table>
+    </div>
   `;
 
   const lista = app.querySelector("#lista");
   const lPorId = Object.fromEntries(lancamentos.map((l) => [l.id, l]));
+  const tabelaState = { sortKey: "nome", sortDir: "asc" };
+
+  function nomeDoLancamento(l, parceiro) {
+    if (!l.parceiroId) return "Faturamento da loja";
+    return parceiro ? `${parceiro.cupom} — ${parceiro.nome}` : "(parceiro removido)";
+  }
+  function chaveOrdenacao(l, parceiro, key) {
+    if (key === "data") return l.dataInicio || "";
+    if (key === "usos") return l.quantidadeUso || 0;
+    return nomeDoLancamento(l, parceiro).toLowerCase();
+  }
 
   function desenhar() {
     const termo = busca.trim().toLowerCase();
@@ -79,20 +103,37 @@ export async function renderLancamentos(app) {
         || (!l.parceiroId && "faturamento da loja".includes(termo));
       const okParceiro = !filtroCupom || chavePorParceiroId[l.parceiroId] === filtroCupom;
       return okBusca && okParceiro;
-    }).sort((a, b) => {
-      const nomeA = a.parceiroId ? (porId[a.parceiroId]?.nome || "") : "Faturamento da loja";
-      const nomeB = b.parceiroId ? (porId[b.parceiroId]?.nome || "") : "Faturamento da loja";
-      return nomeA.localeCompare(nomeB, "pt-BR") || (a.dataInicio || "").localeCompare(b.dataInicio || "");
+    });
+
+    const mul = tabelaState.sortDir === "asc" ? 1 : -1;
+    arr.sort((a, b) => {
+      const va = chaveOrdenacao(a, porId[a.parceiroId], tabelaState.sortKey);
+      const vb = chaveOrdenacao(b, porId[b.parceiroId], tabelaState.sortKey);
+      if (typeof va === "string") return va.localeCompare(vb, "pt-BR") * mul;
+      return (va - vb) * mul;
     });
 
     lista.innerHTML = arr.length
-      ? arr.map((l) => row(l, porId[l.parceiroId])).join("")
-      : `<div class="empty">Nenhum lançamento encontrado.</div>`;
+      ? arr.map((l) => linhaTabela(l, porId[l.parceiroId])).join("")
+      : `<tr><td colspan="5" class="empty">Nenhum lançamento encontrado.</td></tr>`;
+
+    app.querySelectorAll("#tabela-lancamentos th[data-sort]").forEach((th) => {
+      th.classList.toggle("sort-active", th.dataset.sort === tabelaState.sortKey);
+      th.dataset.sortDir = th.dataset.sort === tabelaState.sortKey ? tabelaState.sortDir : "";
+    });
   }
   desenhar();
 
   app.querySelector("#busca").addEventListener("input", (e) => { busca = e.target.value; desenhar(); });
   app.querySelector("#filtro-parceiro").addEventListener("change", (e) => { filtroCupom = e.target.value; desenhar(); });
+  app.querySelector("#tabela-lancamentos thead").addEventListener("click", (e) => {
+    const th = e.target.closest("th[data-sort]");
+    if (!th) return;
+    const key = th.dataset.sort;
+    if (tabelaState.sortKey === key) tabelaState.sortDir = tabelaState.sortDir === "asc" ? "desc" : "asc";
+    else { tabelaState.sortKey = key; tabelaState.sortDir = "asc"; }
+    desenhar();
+  });
 
   app.querySelector(".page-head .toolbar").addEventListener("click", (e) => {
     if (e.target.closest("[data-act='lote']")) return abrirLancamentoLote();
@@ -152,9 +193,14 @@ function abrirCalendarioMes(lancamentos) {
         titulo.textContent = `${MES_NOMES[mes - 1]} / ${ano}`;
         const dias = statusDiasDoMes(lancamentos, ano, mes);
         const offset = (new Date(ano, mes - 1, 1).getDay() + 6) % 7; // segunda-feira primeiro
+        const hoje = new Date();
+        const ehMesAtual = ano === hoje.getFullYear() && mes === hoje.getMonth() + 1;
         const celulas = [];
         for (let i = 0; i < offset; i++) celulas.push(`<div class="cal-dia cal-dia--fora"></div>`);
-        dias.forEach((d) => celulas.push(`<div class="cal-dia cal-dia--${d.status}">${d.dia}</div>`));
+        dias.forEach((d) => {
+          const classeHoje = ehMesAtual && d.dia === hoje.getDate() ? " cal-dia--hoje" : "";
+          celulas.push(`<div class="cal-dia cal-dia--${d.status}${classeHoje}" title="${classeHoje ? "Hoje" : ""}">${d.dia}</div>`);
+        });
         grid.innerHTML = celulas.join("");
       }
       form.querySelector("#cal-prev").addEventListener("click", () => {
@@ -178,24 +224,24 @@ function stat(num, label) {
   </div>`;
 }
 
-function row(l, parceiro) {
+function linhaTabela(l, parceiro) {
   const periodo = l.dataInicio === l.dataFim || !l.dataFim
     ? formatDataBR(l.dataInicio)
     : `${formatDataBR(l.dataInicio)} – ${formatDataBR(l.dataFim)}`;
-  const sub = !l.parceiroId
-    ? `${periodo}${l.periodoLabel ? ` · ${l.periodoLabel}` : ""} · ${formatMoeda(l.faturamentoTotal)} faturamento total${l.faturamentoDelivery ? ` · ${formatMoeda(l.faturamentoDelivery)} via delivery` : ""}`
-    : `${periodo}${l.periodoLabel ? ` · ${l.periodoLabel}` : ""} · ${l.quantidadeUso} usos · ${formatMoeda(l.faturamentoCupom)} via cupom · ${formatMoeda(l.faturamentoTotal)} faturamento total${l.faturamentoDelivery ? ` · ${formatMoeda(l.faturamentoDelivery)} via delivery` : ""} · ticket médio ${formatMoeda(l.ticketMedio)}`;
   const nomeParceiro = !l.parceiroId
     ? "Faturamento da loja"
     : parceiro ? `${parceiro.cupom} — ${parceiro.nome}` : "(parceiro removido)";
-  return `<div class="list-row">
-    <div class="lr-main">
-      <div class="lr-title">${esc(nomeParceiro)}</div>
-      <div class="lr-sub">${esc(sub)}</div>
-    </div>
-    <span class="lr-actions edit-only">
+  const valores = !l.parceiroId
+    ? `${formatMoeda(l.faturamentoTotal)} total${l.faturamentoDelivery ? ` · ${formatMoeda(l.faturamentoDelivery)} delivery` : ""}`
+    : `${formatMoeda(l.faturamentoCupom)} via cupom`;
+  return `<tr class="rank-row" data-id="${esc(l.id)}">
+    <td>${esc(nomeParceiro)}</td>
+    <td>${esc(periodo)}</td>
+    <td class="num">${l.parceiroId ? l.quantidadeUso : "—"}</td>
+    <td class="num">${esc(valores)}</td>
+    <td class="edit-only" style="text-align:right;white-space:nowrap">
       <button class="icon-btn" data-action="editar" data-id="${esc(l.id)}" title="Editar">✎</button>
       <button class="icon-btn danger" data-action="excluir" data-id="${esc(l.id)}" title="Excluir">🗑</button>
-    </span>
-  </div>`;
+    </td>
+  </tr>`;
 }
