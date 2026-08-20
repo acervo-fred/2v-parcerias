@@ -307,7 +307,10 @@ export const firestoreStore = {
   // sem filtro de loja — só pro mapa consolidado da aba Equipe
   async listTasksTodasLojas() { return allDocs(COLLECTIONS.tasks); },
   async addTaskGeral(dados) {
-    const lojaId = await lojaAtualIdOuErro();
+    // aceita lojaId explícito (tela Equipe, que não tem loja "atual" —
+    // mostra todas de uma vez) ou cai pra loja selecionada no sidebar
+    // (Kanban → Próximos Passos, dentro do contexto de uma loja só).
+    const lojaId = dados.lojaId || await lojaAtualIdOuErro();
     const novo = {
       lojaId, description: dados.description || "", dueDate: dados.dueDate || "",
       dataInicio: dados.dataInicio || "", responsavel: dados.responsavel || "", concluidaEm: null,

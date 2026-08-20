@@ -45,6 +45,18 @@ function mesesDoIntervalo(tasks) {
   }
   return meses;
 }
+// linhas verticais finas dividindo as colunas de mês — UMA linha contínua
+// cobrindo a altura inteira do mapa (não por linha/pista), com z-index
+// negativo (ver .mapa-col-guias no CSS) pra ficar sempre atrás de
+// qualquer conteúdo — título de loja, texto de barra etc. — sem nunca
+// tampar palavra nenhuma, já que quem cobre a linha é sempre o que está
+// por cima dela, não o contrário.
+function colGuiasHtml(n) {
+  return `<div class="mapa-col-guias" style="grid-template-columns:repeat(${n},1fr)">${
+    Array.from({ length: n }).map(() => `<div class="mapa-col-guia"></div>`).join("")
+  }</div>`;
+}
+
 function indiceMes(meses, iso) {
   const [ano, mes] = iso.slice(0, 7).split("-").map(Number);
   return meses.findIndex((m) => m.ano === ano && m.mes === mes);
@@ -61,11 +73,19 @@ export async function renderEquipe(app) {
   app.innerHTML = `
     <div class="page-head">
       <div><h1 class="page-title">Equipe</h1></div>
+      <div class="toolbar edit-only">
+        <button class="btn btn-primary" data-act="nova-acao-equipe">+ Cadastrar ação</button>
+      </div>
     </div>
     ${meses.length
       ? `<div class="mapa-equipe" id="mapa-equipe"></div>`
-      : `<div class="empty">Nenhuma demanda cadastrada ainda — cadastre uma ação "Geral" em alguma loja (Kanban → Próximos Passos) pra ela aparecer aqui.</div>`}
+      : `<div class="empty">Nenhuma demanda cadastrada ainda — clique em "+ Cadastrar ação" pra criar a primeira.</div>`}
   `;
+
+  app.querySelector(".page-head .toolbar").addEventListener("click", (e) => {
+    if (e.target.closest("[data-act='nova-acao-equipe']")) abrirCadastrarAcaoEquipe(lojasOrdenadas);
+  });
+
   if (!meses.length) return;
 
   const porLoja = new Map(lojasOrdenadas.map((l) => [l.id, []]));
@@ -75,6 +95,7 @@ export async function renderEquipe(app) {
 
   const mapa = app.querySelector("#mapa-equipe");
   mapa.innerHTML = `
+    ${colGuiasHtml(meses.length)}
     <div class="mapa-cabecalho">
       <div class="mapa-cabecalho-label"></div>
       <div class="mapa-cabecalho-meses" style="grid-template-columns:repeat(${meses.length},1fr)">
@@ -166,6 +187,49 @@ function crmBlocoHtml(meses) {
       </div>
     </div>
   `;
+}
+
+function opcoesLojaHtml(lojas) {
+  return lojas.map((l) => `<option value="${esc(l.id)}">${esc(l.nome)}</option>`).join("");
+}
+
+// "Cadastrar ação" a partir da Equipe — diferente do mesmo botão no
+// Kanban → Próximos Passos (que já sabe a loja pelo contexto do
+// sidebar), aqui a loja precisa ser escolhida explicitamente, já que
+// o mapa mostra todas de uma vez.
+async function abrirCadastrarAcaoEquipe(lojasOrdenadas) {
+  openModal({
+    title: "Cadastrar ação",
+    submitLabel: "Salvar",
+    bodyHtml: `
+      <div class="field">
+        <label for="f_lojaId">Loja *</label>
+        <select id="f_lojaId" name="lojaId" required>
+          <option value="">Selecione...</option>
+          ${opcoesLojaHtml(lojasOrdenadas)}
+        </select>
+      </div>
+      ${fieldTextarea("description", "Descrição", { placeholder: "Ex.: Levantamento e contato parceiros" })}
+      <div class="field-2col">
+        ${fieldText("dataInicio", "Início (opcional)", { type: "date" })}
+        ${fieldText("dueDate", "Prazo", { type: "date", required: true })}
+      </div>
+      ${fieldResponsavel("")}
+    `,
+    onMount: wireResponsavelField,
+    onSubmit: async (form) => {
+      const lojaId = readValue(form, "lojaId");
+      const description = readValue(form, "description");
+      const dueDate = readValue(form, "dueDate");
+      const dataInicio = readValue(form, "dataInicio") || new Date().toISOString().slice(0, 10);
+      const responsavel = readResponsavel(form);
+      if (!lojaId) throw new Error("Selecione a loja.");
+      if (!description) throw new Error("Descreva a ação.");
+      if (!dueDate) throw new Error("Informe o prazo.");
+      await store.addTaskGeral({ lojaId, description, dueDate, dataInicio, responsavel });
+      avisarMudanca();
+    },
+  });
 }
 
 async function abrirEditarTarefa(task, lojaNome) {

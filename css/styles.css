@@ -362,11 +362,22 @@ button { font: inherit; }
 .pp-bar--gray   { background: var(--c-gray-bg);   color: var(--c-gray-fg); }
 
 /* ================= MAPA DA EQUIPE (aba Equipe) ================= */
-.mapa-equipe { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 20px; overflow-x: auto; }
+.mapa-equipe { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 20px; overflow-x: auto; position: relative; z-index: 0; }
 .mapa-cabecalho { display: flex; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
 .mapa-cabecalho-label { width: 160px; flex-shrink: 0; }
 .mapa-cabecalho-meses { flex: 1; display: grid; gap: 4px; min-width: 480px; }
 .mapa-mes { font-size: 11px; font-weight: 800; letter-spacing: 0.4px; text-transform: uppercase; color: var(--text-faint); text-align: center; }
+
+/* linha vertical fina e contínua dividindo as colunas de mês — UM grid
+   absoluto cobrindo a altura inteira de .mapa-equipe (não por linha),
+   com o mesmo template/gap do grid real (ver colGuiasHtml em
+   js/views/equipe.js) e alinhado aos 160px da coluna de rótulo, então
+   fica pixel-perfect com os grids de verdade. z-index negativo garante
+   que a linha sempre fica ATRÁS de título de loja, texto de barra etc.
+   — nunca por cima, então nunca tampa palavra nenhuma. */
+.mapa-col-guias { position: absolute; top: 0; bottom: 0; left: 160px; right: 0; display: grid; gap: 4px; pointer-events: none; z-index: -1; }
+.mapa-col-guia { border-right: 1px solid var(--border); }
+.mapa-col-guia:last-child { border-right: none; }
 
 .mapa-loja { padding: 14px 0; border-bottom: 1px solid var(--border); }
 .mapa-loja:last-of-type { border-bottom: none; }
