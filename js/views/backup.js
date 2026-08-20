@@ -65,19 +65,38 @@ export async function renderBackup(app) {
       </div>
 
       <div class="chart-card edit-only" style="border-color:var(--c-red-fg)">
-        <h3 style="margin-bottom:10px">Excluir loja</h3>
-        <p class="muted" style="margin-top:0;font-size:13.5px">Apaga uma loja inteira: parceiros, cupons, lançamentos e andamento no Pipeline. Não dá pra desfazer.</p>
-        <div class="field" style="margin-bottom:10px">
-          <select class="input" id="del-loja-select">
+        <h3 style="margin-bottom:10px">Editar lojas</h3>
+        <p class="muted" style="margin-top:0;font-size:13.5px">Renomear, apagar só os lançamentos (mantém parceiros e cupons) ou excluir a loja inteira.</p>
+        <div class="field" style="margin-bottom:14px">
+          <select class="input" id="loja-edit-select">
             ${lojas.map((l) => `<option value="${esc(l.id)}">${esc(l.nome)}</option>`).join("")}
           </select>
         </div>
-        <div class="field" style="margin-bottom:10px">
-          <label for="del-loja-confirma" style="font-size:13px">Digite o nome da loja pra confirmar</label>
-          <input class="input" id="del-loja-confirma" type="text" autocomplete="off" />
+
+        <div style="margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid var(--border)">
+          <label for="loja-edit-nome" style="font-size:13px;font-weight:700">Nome da loja</label>
+          <div style="display:flex;gap:8px;margin-top:6px">
+            <input class="input" id="loja-edit-nome" type="text" style="flex:1" />
+            <button class="btn" id="btn-renomear-loja">Salvar nome</button>
+          </div>
+          <div id="renomear-status" class="muted" style="font-size:13px;margin-top:6px"></div>
         </div>
-        <button class="btn btn-danger" id="btn-del-loja" disabled>🗑 Excluir esta loja</button>
-        <div id="del-loja-status" class="muted" style="font-size:13px;margin-top:8px"></div>
+
+        <div style="margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid var(--border)">
+          <p style="font-size:13px;margin:0 0 8px"><strong>Apagar base de dados</strong> — apaga todos os lançamentos desta loja. Parceiros e cupons continuam cadastrados. Não dá pra desfazer.</p>
+          <label for="loja-wipe-confirma" style="font-size:13px">Digite o nome da loja pra confirmar</label>
+          <input class="input" id="loja-wipe-confirma" type="text" autocomplete="off" style="margin:6px 0;display:block;width:100%" />
+          <button class="btn btn-danger" id="btn-wipe-loja" disabled>🗑 Apagar lançamentos desta loja</button>
+          <div id="wipe-loja-status" class="muted" style="font-size:13px;margin-top:8px"></div>
+        </div>
+
+        <div>
+          <p style="font-size:13px;margin:0 0 8px"><strong>Excluir loja</strong> — apaga a loja inteira: parceiros, cupons, lançamentos e andamento no Pipeline. Não dá pra desfazer.</p>
+          <label for="del-loja-confirma" style="font-size:13px">Digite o nome da loja pra confirmar</label>
+          <input class="input" id="del-loja-confirma" type="text" autocomplete="off" style="margin:6px 0;display:block;width:100%" />
+          <button class="btn btn-danger" id="btn-del-loja" disabled>🗑 Excluir esta loja</button>
+          <div id="del-loja-status" class="muted" style="font-size:13px;margin-top:8px"></div>
+        </div>
       </div>
     </div>
   `;
@@ -136,21 +155,76 @@ export async function renderBackup(app) {
     }
   });
 
-  const delSelect = app.querySelector("#del-loja-select");
+  const lojaSelect = app.querySelector("#loja-edit-select");
+  function lojaSelecionada() {
+    return lojas.find((l) => l.id === lojaSelect.value);
+  }
+
+  // ---- renomear ----
+  const nomeInput = app.querySelector("#loja-edit-nome");
+  const renomearBtn = app.querySelector("#btn-renomear-loja");
+  const renomearStatus = app.querySelector("#renomear-status");
+  function preencherNomeAtual() {
+    nomeInput.value = lojaSelecionada()?.nome || "";
+    renomearStatus.textContent = "";
+  }
+  preencherNomeAtual();
+  renomearBtn.addEventListener("click", async () => {
+    const id = lojaSelect.value;
+    const novoNome = nomeInput.value.trim();
+    if (!novoNome) { renomearStatus.textContent = "✗ Informe um nome."; return; }
+    if (novoNome === lojaSelecionada()?.nome) return;
+    renomearStatus.textContent = "Salvando…";
+    try {
+      await store.updateLoja(id, { nome: novoNome });
+      renomearStatus.textContent = "✓ Nome atualizado. Recarregando…";
+      setTimeout(() => { location.reload(); }, 600);
+    } catch (err) {
+      renomearStatus.textContent = "✗ Erro: " + err.message;
+    }
+  });
+
+  // ---- botões de "digite o nome pra confirmar" (apagar base / excluir loja) ----
+  function wireConfirmacaoPorNome(inputEl, btnEl) {
+    btnEl.disabled = true;
+    inputEl.addEventListener("input", () => {
+      btnEl.disabled = inputEl.value.trim() !== (lojaSelecionada()?.nome || "");
+    });
+  }
+  const wipeConfirma = app.querySelector("#loja-wipe-confirma");
+  const wipeBtn = app.querySelector("#btn-wipe-loja");
+  const wipeStatus = app.querySelector("#wipe-loja-status");
+  wireConfirmacaoPorNome(wipeConfirma, wipeBtn);
+
   const delConfirma = app.querySelector("#del-loja-confirma");
   const delBtn = app.querySelector("#btn-del-loja");
   const delStatus = app.querySelector("#del-loja-status");
-  function nomeSelecionado() {
-    return lojas.find((l) => l.id === delSelect.value)?.nome || "";
-  }
-  function atualizarBotao() {
-    delBtn.disabled = delConfirma.value.trim() !== nomeSelecionado();
-  }
-  delSelect.addEventListener("change", () => { delConfirma.value = ""; atualizarBotao(); });
-  delConfirma.addEventListener("input", atualizarBotao);
+  wireConfirmacaoPorNome(delConfirma, delBtn);
+
+  lojaSelect.addEventListener("change", () => {
+    preencherNomeAtual();
+    wipeConfirma.value = ""; wipeBtn.disabled = true; wipeStatus.textContent = "";
+    delConfirma.value = ""; delBtn.disabled = true; delStatus.textContent = "";
+  });
+
+  wipeBtn.addEventListener("click", async () => {
+    const id = lojaSelect.value;
+    const nome = lojaSelecionada()?.nome || "";
+    if (wipeConfirma.value.trim() !== nome) return;
+    if (!confirm(`Apagar TODOS os lançamentos de "${nome}"? Parceiros e cupons continuam cadastrados. Não dá pra desfazer.`)) return;
+    wipeStatus.textContent = "Apagando…";
+    try {
+      const n = await store.wipeLancamentosDaLoja(id);
+      wipeStatus.textContent = `✓ ${n} lançamento(s) apagado(s). Recarregando…`;
+      setTimeout(() => { location.reload(); }, 600);
+    } catch (err) {
+      wipeStatus.textContent = "✗ Erro: " + err.message;
+    }
+  });
+
   delBtn.addEventListener("click", async () => {
-    const id = delSelect.value;
-    const nome = nomeSelecionado();
+    const id = lojaSelect.value;
+    const nome = lojaSelecionada()?.nome || "";
     if (delConfirma.value.trim() !== nome) return;
     if (!confirm(`Excluir a loja "${nome}"? Isso apaga TODOS os parceiros, cupons e lançamentos dela. Não dá pra desfazer.`)) return;
     delStatus.textContent = "Excluindo…";

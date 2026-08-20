@@ -122,6 +122,8 @@ const localStore = {
     persistir();
     return structuredClone(novo);
   },
+  async updateLoja() { throw new Error("Editar loja ainda não está disponível no modo local (sem Firestore)."); },
+  async wipeLancamentosDaLoja() { throw new Error("Apagar base de dados da loja ainda não está disponível no modo local (sem Firestore)."); },
   async removeLoja() { throw new Error("Excluir loja ainda não está disponível no modo local (sem Firestore)."); },
 
   /* ---------- grupos de cupons ---------- */

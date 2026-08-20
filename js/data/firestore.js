@@ -12,7 +12,7 @@
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
-  getFirestore, collection, doc, getDoc, getDocsFromServer,
+  getFirestore, collection, doc, getDoc, getDocFromServer, getDocsFromServer,
   addDoc, setDoc, updateDoc, deleteDoc, query, where,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
@@ -89,6 +89,19 @@ export const firestoreStore = {
     const ref = await addDoc(collection(fdb, COLLECTIONS.lojas), novo);
     return { id: ref.id, ...novo };
   },
+  async updateLoja(id, campos) {
+    await updateDoc(doc(fdb, COLLECTIONS.lojas, id), campos);
+    return { id, ...campos };
+  },
+  // apaga só os lançamentos (Base de dados) da loja — mantém parceiros,
+  // cupons e o pipeline intactos. Pra recomeçar o histórico de
+  // desempenho sem perder o cadastro (ver caso real: "Largo Machado"
+  // usada como recomeço limpo de "Largo do Machado", 2026-08-19).
+  async wipeLancamentosDaLoja(id) {
+    const docs = await docsWhere(COLLECTIONS.lancamentos, "lojaId", id);
+    await Promise.all(docs.map((d) => deleteDoc(doc(fdb, COLLECTIONS.lancamentos, d.id))));
+    return docs.length;
+  },
   // apaga a loja e cascateia tudo que é dela (mesmo padrão de
   // removeParceiro cascateando lançamentos) — parceiros, lançamentos,
   // grupos de cupom, partners (CRM) e tasks "Geral"
@@ -102,6 +115,19 @@ export const firestoreStore = {
       await Promise.all(docs.map((d) => deleteDoc(doc(fdb, colecao, d.id))));
     }
     await deleteDoc(doc(fdb, COLLECTIONS.lojas, id));
+    // confere que o documento da loja realmente sumiu — já vimos esse
+    // delete final "não pegar" mesmo com a cascata toda concluída
+    // (causa nunca confirmada, possível hiccup de rede), deixando a
+    // loja vazia mas ainda listada. Tenta mais uma vez antes de
+    // desistir, e só reporta sucesso se de fato sumiu.
+    let aindaExiste = await getDocFromServer(doc(fdb, COLLECTIONS.lojas, id));
+    if (aindaExiste.exists()) {
+      await deleteDoc(doc(fdb, COLLECTIONS.lojas, id));
+      aindaExiste = await getDocFromServer(doc(fdb, COLLECTIONS.lojas, id));
+      if (aindaExiste.exists()) {
+        throw new Error("Os dados foram apagados, mas não foi possível remover o registro da loja. Tente excluir de novo.");
+      }
+    }
     return true;
   },
 
