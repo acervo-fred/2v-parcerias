@@ -13,8 +13,8 @@
 import { store } from "../data/store.js";
 import { esc } from "../ui/dom.js";
 import { openModal, fieldText, fieldTextarea, readValue } from "../ui/modal.js";
-import { fieldResponsavel, wireResponsavelField, readResponsavel } from "../ui/campo-responsavel.js";
-import { corDe, bucketDe, MES_NOMES } from "../data/funil.js";
+import { fieldResponsavel, wireResponsavelField, readResponsaveis } from "../ui/campo-responsavel.js";
+import { corDe, bucketDe, responsaveisDe, MES_NOMES } from "../data/funil.js";
 
 function avisarMudanca() {
   window.dispatchEvent(new CustomEvent("data-changed"));
@@ -119,9 +119,12 @@ export async function renderEquipe(app) {
 function lojaBlocoHtml(loja, tasksDaLoja, meses) {
   const porResponsavel = new Map();
   for (const t of tasksDaLoja) {
-    const b = bucketDe(t.responsavel);
-    if (!porResponsavel.has(b)) porResponsavel.set(b, []);
-    porResponsavel.get(b).push(t);
+    const nomes = responsaveisDe(t);
+    const buckets = nomes.length ? [...new Set(nomes.map(bucketDe))] : ["Outros"];
+    for (const b of buckets) {
+      if (!porResponsavel.has(b)) porResponsavel.set(b, []);
+      porResponsavel.get(b).push(t);
+    }
   }
   const buckets = [...porResponsavel.entries()];
   return `
@@ -214,7 +217,7 @@ async function abrirCadastrarAcaoEquipe(lojasOrdenadas) {
         ${fieldText("dataInicio", "Início (opcional)", { type: "date" })}
         ${fieldText("dueDate", "Prazo", { type: "date", required: true })}
       </div>
-      ${fieldResponsavel("")}
+      ${fieldResponsavel([])}
     `,
     onMount: wireResponsavelField,
     onSubmit: async (form) => {
@@ -222,11 +225,11 @@ async function abrirCadastrarAcaoEquipe(lojasOrdenadas) {
       const description = readValue(form, "description");
       const dueDate = readValue(form, "dueDate");
       const dataInicio = readValue(form, "dataInicio") || new Date().toISOString().slice(0, 10);
-      const responsavel = readResponsavel(form);
+      const responsaveis = readResponsaveis(form);
       if (!lojaId) throw new Error("Selecione a loja.");
       if (!description) throw new Error("Descreva a ação.");
       if (!dueDate) throw new Error("Informe o prazo.");
-      await store.addTaskGeral({ lojaId, description, dueDate, dataInicio, responsavel });
+      await store.addTaskGeral({ lojaId, description, dueDate, dataInicio, responsaveis });
       avisarMudanca();
     },
   });
@@ -243,17 +246,17 @@ async function abrirEditarTarefa(task, lojaNome) {
         ${fieldText("dataInicio", "Início (opcional)", { type: "date", value: task.dataInicio || "" })}
         ${fieldText("dueDate", "Prazo", { type: "date", required: true, value: task.dueDate || "" })}
       </div>
-      ${fieldResponsavel(task.responsavel || "")}
+      ${fieldResponsavel(responsaveisDe(task))}
     `,
     onMount: wireResponsavelField,
     onSubmit: async (form) => {
       const description = readValue(form, "description");
       const dueDate = readValue(form, "dueDate");
       const dataInicio = readValue(form, "dataInicio") || "";
-      const responsavel = readResponsavel(form);
+      const responsaveis = readResponsaveis(form);
       if (!description) throw new Error("Descreva a demanda.");
       if (!dueDate) throw new Error("Informe o prazo.");
-      await store.updateTaskGeral(task.id, { description, dueDate, dataInicio, responsavel });
+      await store.updateTaskGeral(task.id, { description, dueDate, dataInicio, responsaveis });
       avisarMudanca();
     },
   });

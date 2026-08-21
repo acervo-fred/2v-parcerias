@@ -11,12 +11,12 @@
 import { store } from "../data/store.js";
 import { esc, formatDataBR } from "../ui/dom.js";
 import { openModal, fieldText, fieldTextarea, readValue } from "../ui/modal.js";
-import { fieldResponsavel, wireResponsavelField, readResponsavel } from "../ui/campo-responsavel.js";
+import { fieldResponsavel, wireResponsavelField, readResponsaveis } from "../ui/campo-responsavel.js";
 import { acaoRowHtml } from "../ui/acao-row.js";
 import {
   carregarFunil, garantirPartner, nivelUrgencia,
   criarAcao, adicionarAcao, editarAcao, concluirAcao, excluirAcao,
-  corDe, bucketDe, MES_NOMES,
+  corDe, bucketDe, responsaveisDe, MES_NOMES,
 } from "../data/funil.js";
 
 const DIAS_SEMANA = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
@@ -55,10 +55,18 @@ function agruparPorData(pares) {
   return [...mapa.entries()].sort((a, b) => a[0].localeCompare(b[0]));
 }
 // agrupa em 4 blocos fixos (Fred/Manu/Laura/Outros) — "Outros" cobre
-// nome personalizado e ações antigas sem responsável definido
+// nome personalizado e ações antigas sem responsável definido. Uma
+// ação com vários responsáveis aparece em cada bucket correspondente
+// (mesma ação, uma linha por responsável) — igual à repetição que já
+// acontecia com o campo único, só que agora pode repetir em mais de um
+// bucket em vez de só um.
 function agruparPorResponsavel(pares) {
   const buckets = new Map([["Fred", []], ["Manu", []], ["Laura", []], ["Outros", []]]);
-  for (const par of pares) buckets.get(bucketDe(par.acao.responsavel)).push(par);
+  for (const par of pares) {
+    const nomes = responsaveisDe(par.acao);
+    const bucketsDoPar = nomes.length ? [...new Set(nomes.map(bucketDe))] : ["Outros"];
+    for (const b of bucketsDoPar) buckets.get(b).push(par);
+  }
   return [...buckets.entries()].filter(([, lista]) => lista.length);
 }
 function listaAgrupadaHtml(pares, vazioTexto, concluida) {
@@ -219,13 +227,20 @@ function semanasDoMes(ano, mes) {
 }
 // cada ação pendente vira um item com intervalo [inicio,fim] — ações
 // antigas sem dataInicio gravada viram evento de 1 dia só, na própria
-// dueDate (fallback só de exibição, não reescreve o dado).
+// dueDate (fallback só de exibição, não reescreve o dado). Uma ação
+// com vários responsáveis vira uma barra por responsável (cada uma na
+// cor dele), mesmo espírito do fan-out da lista agrupada.
 function listarAcoesCalendario(todosCards, tasksGerais) {
-  return listarAcoesPendentes(todosCards, tasksGerais).map(({ card, acao }) => {
+  const out = [];
+  for (const { card, acao } of listarAcoesPendentes(todosCards, tasksGerais)) {
     const fim = acao.dueDate;
     const inicio = acao.dataInicio && acao.dataInicio <= fim ? acao.dataInicio : fim;
-    return { id: acao.id, name: card.name, responsavel: acao.responsavel, description: acao.description, inicio, fim };
-  });
+    const nomes = responsaveisDe(acao);
+    for (const responsavel of nomes.length ? nomes : [""]) {
+      out.push({ id: acao.id, name: card.name, responsavel, description: acao.description, inicio, fim });
+    }
+  }
+  return out;
 }
 function calendarioHtml(todosCards, tasksGerais, ano, mes) {
   const acoes = listarAcoesCalendario(todosCards, tasksGerais);
@@ -301,33 +316,33 @@ async function abrirFormAcao(todosCards, parceiros, partnersById, existente = nu
         ${fieldText("dataInicio", "Início (opcional)", { type: "date", value: acao.dataInicio || "" })}
         ${fieldText("dueDate", "Prazo", { type: "date", required: true, value: acao.dueDate || "" })}
       </div>
-      ${fieldResponsavel(acao.responsavel || "")}
+      ${fieldResponsavel(responsaveisDe(acao))}
     `,
     onMount: wireResponsavelField,
     onSubmit: async (form) => {
       const description = readValue(form, "description");
       const dueDate = readValue(form, "dueDate");
       const dataInicio = readValue(form, "dataInicio") || new Date().toISOString().slice(0, 10);
-      const responsavel = readResponsavel(form);
+      const responsaveis = readResponsaveis(form);
       if (!description) throw new Error("Descreva a ação.");
       if (!dueDate) throw new Error("Informe o prazo.");
       if (ed) {
         if (existente.card.id === "geral") {
-          await store.updateTaskGeral(existente.acao.id, { description, dueDate, dataInicio, responsavel });
+          await store.updateTaskGeral(existente.acao.id, { description, dueDate, dataInicio, responsaveis });
         } else {
           const partner = partnersById[existente.card.id];
-          await editarAcao(existente.card.id, partner, existente.acao.id, { description, dueDate, dataInicio, responsavel });
+          await editarAcao(existente.card.id, partner, existente.acao.id, { description, dueDate, dataInicio, responsaveis });
         }
       } else {
         const negocioId = readValue(form, "negocioId");
         if (!negocioId) {
-          await store.addTaskGeral({ description, dueDate, dataInicio, responsavel });
+          await store.addTaskGeral({ description, dueDate, dataInicio, responsaveis });
         } else if (partnersById[negocioId]) {
-          await adicionarAcao(negocioId, partnersById[negocioId], { description, dueDate, dataInicio, responsavel });
+          await adicionarAcao(negocioId, partnersById[negocioId], { description, dueDate, dataInicio, responsaveis });
         } else {
           const origem = parceiros.find((p) => p.id === negocioId);
           await garantirPartner(negocioId, origem, partnersById, {
-            nextActions: [criarAcao({ description, dueDate, dataInicio, responsavel })],
+            nextActions: [criarAcao({ description, dueDate, dataInicio, responsaveis })],
           });
         }
       }

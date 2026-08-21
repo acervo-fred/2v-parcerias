@@ -339,7 +339,7 @@ export const firestoreStore = {
     const lojaId = dados.lojaId || await lojaAtualIdOuErro();
     const novo = {
       lojaId, description: dados.description || "", dueDate: dados.dueDate || "",
-      dataInicio: dados.dataInicio || "", responsavel: dados.responsavel || "", concluidaEm: null,
+      dataInicio: dados.dataInicio || "", responsaveis: dados.responsaveis || [], concluidaEm: null,
     };
     const ref = await addDoc(collection(fdb, COLLECTIONS.tasks), novo);
     return { id: ref.id, ...novo };

@@ -6,7 +6,7 @@ import { esc } from "../ui/dom.js";
 import { badgeFromLista } from "../ui/badges.js";
 import { validadeCupomTexto, cupomEm50, chaveCupom, statusCupomEfetivo } from "../util/cupom.js";
 import { openModal, fieldText, fieldTextarea, readValue } from "../ui/modal.js";
-import { fieldResponsavel, wireResponsavelField, readResponsavel } from "../ui/campo-responsavel.js";
+import { fieldResponsavel, wireResponsavelField, readResponsaveis } from "../ui/campo-responsavel.js";
 import { abrirNovoParceiro, abrirEditarParceiro } from "./cadastros.js";
 import { adicionarAcao, garantirPartner, criarAcao } from "../data/funil.js";
 
@@ -157,20 +157,20 @@ async function abrirProximaAcaoEmLote(ids, porId, partnersById, aoTerminar) {
         ${fieldText("dataInicio", "Início (opcional)", { type: "date" })}
         ${fieldText("dueDate", "Prazo", { type: "date", required: true })}
       </div>
-      ${fieldResponsavel()}
+      ${fieldResponsavel([])}
     `,
     onMount: wireResponsavelField,
     onSubmit: async (form) => {
       const description = readValue(form, "description");
       const dueDate = readValue(form, "dueDate");
       const dataInicio = readValue(form, "dataInicio") || new Date().toISOString().slice(0, 10);
-      const responsavel = readResponsavel(form);
+      const responsaveis = readResponsaveis(form);
       if (!description) throw new Error("Descreva a próxima ação.");
       if (!dueDate) throw new Error("Informe o prazo da próxima ação.");
       const resultados = await Promise.allSettled(
         ids.map((id) => partnersById[id]
-          ? adicionarAcao(id, partnersById[id], { description, dueDate, dataInicio, responsavel })
-          : garantirPartner(id, porId[id], partnersById, { nextActions: [criarAcao({ description, dueDate, dataInicio, responsavel })] }))
+          ? adicionarAcao(id, partnersById[id], { description, dueDate, dataInicio, responsaveis })
+          : garantirPartner(id, porId[id], partnersById, { nextActions: [criarAcao({ description, dueDate, dataInicio, responsaveis })] }))
       );
       const falhas = resultados
         .map((r, i) => (r.status === "rejected" ? porId[ids[i]]?.nome || ids[i] : null))

@@ -16,9 +16,9 @@ import { store } from "../data/store.js";
 import { esc, formatMoeda, formatDataBR } from "../ui/dom.js";
 import { badge, badgeFromLista } from "../ui/badges.js";
 import { openModal, fieldText, fieldTextarea, fieldSelect, readValue } from "../ui/modal.js";
-import { fieldResponsavel, wireResponsavelField, readResponsavel } from "../ui/campo-responsavel.js";
+import { fieldResponsavel, wireResponsavelField, readResponsaveis } from "../ui/campo-responsavel.js";
 import { acaoRowHtml } from "../ui/acao-row.js";
-import { acoesDe, adicionarAcao, editarAcao, concluirAcao, excluirAcao, STAGE_META } from "../data/funil.js";
+import { acoesDe, adicionarAcao, editarAcao, concluirAcao, excluirAcao, responsaveisDe, STAGE_META } from "../data/funil.js";
 import { chaveCupom, validadeCupomTexto, cupomEm50 } from "../util/cupom.js";
 import { dedupLancamentos } from "../util/periodo.js";
 
@@ -326,18 +326,18 @@ async function abrirFormAcaoFicha(partner, acaoExistente = null) {
         ${fieldText("dataInicio", "Início (opcional)", { type: "date", value: atual.dataInicio || "" })}
         ${fieldText("dueDate", "Prazo", { type: "date", required: true, value: atual.dueDate || "" })}
       </div>
-      ${fieldResponsavel(atual.responsavel || "")}
+      ${fieldResponsavel(responsaveisDe(atual))}
     `,
     onMount: wireResponsavelField,
     onSubmit: async (form) => {
       const description = readValue(form, "description");
       const dueDate = readValue(form, "dueDate");
       const dataInicio = readValue(form, "dataInicio") || new Date().toISOString().slice(0, 10);
-      const responsavel = readResponsavel(form);
+      const responsaveis = readResponsaveis(form);
       if (!description) throw new Error("Descreva a ação.");
       if (!dueDate) throw new Error("Informe o prazo.");
-      if (ed) await editarAcao(partner.id, partner, acaoExistente.id, { description, dueDate, dataInicio, responsavel });
-      else await adicionarAcao(partner.id, partner, { description, dueDate, dataInicio, responsavel });
+      if (ed) await editarAcao(partner.id, partner, acaoExistente.id, { description, dueDate, dataInicio, responsaveis });
+      else await adicionarAcao(partner.id, partner, { description, dueDate, dataInicio, responsaveis });
       avisarMudanca();
     },
   });

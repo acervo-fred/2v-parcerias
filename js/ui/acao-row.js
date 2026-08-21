@@ -7,11 +7,11 @@
    data-card-id do negócio dono dela). */
 
 import { esc, formatDataBR } from "./dom.js";
-import { nivelUrgencia } from "../data/funil.js";
+import { nivelUrgencia, responsaveisDe } from "../data/funil.js";
 
 export function acaoRowHtml(cardId, acao, { concluida = false, nome = "" } = {}) {
   const nivel = !concluida ? nivelUrgencia(acao.dueDate) : "";
-  const subPartes = [formatDataBR(acao.dueDate), acao.responsavel];
+  const subPartes = [formatDataBR(acao.dueDate), responsaveisDe(acao).join(", ")];
   if (concluida && acao.concluidaEm) subPartes.push(`concluída em ${formatDataBR(acao.concluidaEm)}`);
   const sub = esc(subPartes.filter(Boolean).join(" · "));
 

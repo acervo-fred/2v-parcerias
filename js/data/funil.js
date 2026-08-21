@@ -34,6 +34,18 @@ export function bucketDe(responsavel) {
   return RESPONSAVEIS_FIXOS.includes(responsavel) ? responsavel : "Outros";
 }
 
+/* Uma ação pode ter vários responsáveis (`responsaveis: string[]`) —
+   quem grava sempre escreve nesse campo. Compatibilidade: ações
+   antigas só têm o campo único `responsavel` (string); só cai nesse
+   fallback quando `responsaveis` nem existe no doc (uma vez editada,
+   `responsaveis` passa a existir — mesmo vazio — e vira a fonte única,
+   igual ao padrão de acoesDe() pra nextAction/nextActions). */
+export function responsaveisDe(acao) {
+  if (Array.isArray(acao?.responsaveis)) return acao.responsaveis;
+  if (acao?.responsavel) return [acao.responsavel];
+  return [];
+}
+
 export async function carregarFunil() {
   const [partners, parceiros] = await Promise.all([store.listPartners(), store.listParceiros()]);
   const partnersById = Object.fromEntries(partners.map((p) => [p.id, p]));
