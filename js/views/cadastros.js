@@ -57,7 +57,10 @@ export async function abrirNovoProspecto(existente = null) {
     title: ed ? "Editar prospecção" : "Nova prospecção",
     submitLabel: ed ? "Salvar alterações" : "Adicionar",
     bodyHtml: `
-      ${fieldSelect("tipo", "Tipo de negócio", listas.tipoNegocio, { value: p.tipo || listas.tipoNegocio[0]?.valor })}
+      <div class="field-2col">
+        ${fieldSelect("tipo", "Tipo de negócio", listas.tipoNegocio, { value: p.tipo || listas.tipoNegocio[0]?.valor })}
+        ${fieldText("tipoDetalhe", "Especificar (opcional)", { value: p.tipoDetalhe || "", placeholder: "Ex.: Pilates" })}
+      </div>
       ${fieldText("nome", "Nome do negócio", { required: true, value: p.nome || "", placeholder: "Ex.: Salus Flamengo" })}
       ${fieldText("local", "Local / endereço", { value: p.local || "", placeholder: "Ex.: Praia do Flamengo, 154" })}
       <div class="field-2col">
@@ -71,6 +74,7 @@ export async function abrirNovoProspecto(existente = null) {
       if (!nome) throw new Error("Informe o nome do negócio.");
       const campos = {
         tipo: readValue(form, "tipo"),
+        tipoDetalhe: readValue(form, "tipoDetalhe"),
         nome,
         local: readValue(form, "local"),
         responsavel: readValue(form, "responsavel"),
@@ -133,7 +137,7 @@ export async function abrirFecharParceria(parceiro) {
         await store.updatePartner(parceiro.id, { stage: "ativo", stageUpdatedAt: agora });
       } else {
         await store.addPartner(parceiro.id, {
-          name: parceiro.nome, type: parceiro.tipo || "", address: parceiro.local || "",
+          name: parceiro.nome, type: parceiro.tipo || "", typeDetalhe: parceiro.tipoDetalhe || "", address: parceiro.local || "",
           responsavel: parceiro.responsavel || "", contactRaw: parceiro.contato || "",
           stage: "ativo", stageUpdatedAt: agora,
         });
@@ -151,7 +155,10 @@ export async function abrirNovoParceiro() {
     submitLabel: "Adicionar",
     wide: true,
     bodyHtml: `
-      ${fieldSelect("tipo", "Tipo de negócio", listas.tipoNegocio, { value: listas.tipoNegocio[0]?.valor })}
+      <div class="field-2col">
+        ${fieldSelect("tipo", "Tipo de negócio", listas.tipoNegocio, { value: listas.tipoNegocio[0]?.valor })}
+        ${fieldText("tipoDetalhe", "Especificar (opcional)", { value: "", placeholder: "Ex.: Pilates" })}
+      </div>
       ${fieldText("nome", "Nome do negócio", { required: true, value: "", placeholder: "Ex.: Salus Flamengo" })}
       ${fieldText("local", "Local / endereço", { value: "", placeholder: "Ex.: Praia do Flamengo, 154" })}
       <div class="field-2col">
@@ -176,6 +183,7 @@ export async function abrirNovoParceiro() {
       if (!cupom) throw new Error("Informe o código do cupom.");
       const novo = await store.addParceiro({
         tipo: readValue(form, "tipo"),
+        tipoDetalhe: readValue(form, "tipoDetalhe"),
         nome,
         local: readValue(form, "local"),
         responsavel: readValue(form, "responsavel"),
@@ -208,7 +216,10 @@ export async function abrirEditarParceiro(parceiro) {
     submitLabel: "Salvar alterações",
     wide: true,
     bodyHtml: `
-      ${fieldSelect("tipo", "Tipo de negócio", listas.tipoNegocio, { value: p.tipo || listas.tipoNegocio[0]?.valor })}
+      <div class="field-2col">
+        ${fieldSelect("tipo", "Tipo de negócio", listas.tipoNegocio, { value: p.tipo || listas.tipoNegocio[0]?.valor })}
+        ${fieldText("tipoDetalhe", "Especificar (opcional)", { value: p.tipoDetalhe || "", placeholder: "Ex.: Pilates" })}
+      </div>
       ${fieldText("nome", "Nome do negócio", { required: true, value: p.nome || "" })}
       ${fieldText("local", "Local / endereço", { value: p.local || "" })}
       <div class="field-2col">
@@ -233,6 +244,7 @@ export async function abrirEditarParceiro(parceiro) {
       if (!cupom) throw new Error("Informe o código do cupom.");
       await store.updateParceiro(p.id, {
         tipo: readValue(form, "tipo"),
+        tipoDetalhe: readValue(form, "tipoDetalhe"),
         nome,
         local: readValue(form, "local"),
         responsavel: readValue(form, "responsavel"),

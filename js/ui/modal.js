@@ -11,11 +11,16 @@ const root = () => document.getElementById("modal-root");
    - submitLabel (padrão "Salvar")
    - onSubmit(formEl): pode lançar Error(msg) p/ exibir erro e não fechar;
      se resolver, o modal fecha. Pode ser async.
-   - onMount(formEl): chamado após render (para hidratar widgets) */
+   - onMount(formEl): chamado após render (para hidratar widgets)
+   - onDelete(): opcional — quando presente, mostra um botão de excluir
+     separado (à esquerda, longe de Cancelar/Salvar, pra não clicar sem
+     querer); pede confirm(deleteConfirm) antes de chamar. Pode ser async
+     e lançar Error(msg) igual onSubmit. */
 export function openModal(opts) {
   const {
     title, subtitle = "", bodyHtml = "",
     submitLabel = "Salvar", onSubmit, onMount, wide = false,
+    onDelete, deleteLabel = "🗑 Excluir", deleteConfirm = "Excluir?",
   } = opts;
 
   const overlay = document.createElement("div");
@@ -35,6 +40,7 @@ export function openModal(opts) {
           ${bodyHtml}
         </div>
         <div class="modal-foot">
+          ${onDelete ? `<button type="button" class="btn btn-ghost btn-danger" data-delete style="margin-right:auto">${esc(deleteLabel)}</button>` : ""}
           <button type="button" class="btn btn-ghost" data-close>Cancelar</button>
           <button type="submit" class="btn btn-primary">${esc(submitLabel)}</button>
         </div>
@@ -70,6 +76,23 @@ export function openModal(opts) {
       btn.disabled = false;
     }
   });
+
+  if (onDelete) {
+    const delBtn = overlay.querySelector("[data-delete]");
+    delBtn.addEventListener("click", async () => {
+      if (!confirm(deleteConfirm)) return;
+      errBox.style.display = "none";
+      delBtn.disabled = true;
+      try {
+        await onDelete();
+        close();
+      } catch (err) {
+        errBox.textContent = err.message || "Erro ao excluir.";
+        errBox.style.display = "block";
+        delBtn.disabled = false;
+      }
+    });
+  }
 
   onMount?.(form);
   form.querySelector("input, select, textarea")?.focus();

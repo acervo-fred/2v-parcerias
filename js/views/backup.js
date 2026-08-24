@@ -8,6 +8,7 @@ import { USE_FIRESTORE } from "../config/firebase-config.js";
 import * as mock from "../data/mock.js";
 import { esc } from "../ui/dom.js";
 import { getLojaAtualId, setLojaAtualId } from "../data/loja-atual.js";
+import { geocodeEndereco } from "../util/geocoding.js";
 
 const LS_KEY = "2v-parcerias-db-v1";
 
@@ -80,6 +81,16 @@ export async function renderBackup(app) {
             <button class="btn" id="btn-renomear-loja">Salvar nome</button>
           </div>
           <div id="renomear-status" class="muted" style="font-size:13px;margin-top:6px"></div>
+        </div>
+
+        <div style="margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid var(--border)">
+          <label for="loja-edit-endereco" style="font-size:13px;font-weight:700">Endereço da loja</label>
+          <p class="muted" style="font-size:12.5px;margin:2px 0 6px">Usado pra centralizar o mapa da Prospecção e calcular distância até cada negócio.</p>
+          <div style="display:flex;gap:8px">
+            <input class="input" id="loja-edit-endereco" type="text" style="flex:1" placeholder="Ex.: Praia do Flamengo, 154 - Flamengo" />
+            <button class="btn" id="btn-salvar-endereco">Salvar endereço</button>
+          </div>
+          <div id="endereco-status" class="muted" style="font-size:13px;margin-top:6px"></div>
         </div>
 
         <div style="margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid var(--border)">
@@ -184,6 +195,32 @@ export async function renderBackup(app) {
     }
   });
 
+  // ---- endereço (usado pelo mapa da Prospecção) ----
+  const enderecoInput = app.querySelector("#loja-edit-endereco");
+  const salvarEnderecoBtn = app.querySelector("#btn-salvar-endereco");
+  const enderecoStatus = app.querySelector("#endereco-status");
+  function preencherEnderecoAtual() {
+    enderecoInput.value = lojaSelecionada()?.endereco || "";
+    enderecoStatus.textContent = "";
+  }
+  preencherEnderecoAtual();
+  salvarEnderecoBtn.addEventListener("click", async () => {
+    const id = lojaSelect.value;
+    const novoEndereco = enderecoInput.value.trim();
+    if (!novoEndereco) { enderecoStatus.textContent = "✗ Informe um endereço."; return; }
+    enderecoStatus.textContent = "Localizando endereço…";
+    try {
+      const coord = await geocodeEndereco(novoEndereco);
+      await store.updateLoja(id, { endereco: novoEndereco, lat: coord?.lat ?? null, lng: coord?.lng ?? null });
+      enderecoStatus.textContent = coord
+        ? "✓ Endereço salvo e localizado no mapa. Recarregando…"
+        : "✓ Endereço salvo, mas não consegui localizar no mapa — o mapa da Prospecção fica desativado até achar um endereço mais específico. Recarregando…";
+      setTimeout(() => { location.reload(); }, 900);
+    } catch (err) {
+      enderecoStatus.textContent = "✗ Erro: " + err.message;
+    }
+  });
+
   // ---- botões de "digite o nome pra confirmar" (apagar base / excluir loja) ----
   function wireConfirmacaoPorNome(inputEl, btnEl) {
     btnEl.disabled = true;
@@ -203,6 +240,7 @@ export async function renderBackup(app) {
 
   lojaSelect.addEventListener("change", () => {
     preencherNomeAtual();
+    preencherEnderecoAtual();
     wipeConfirma.value = ""; wipeBtn.disabled = true; wipeStatus.textContent = "";
     delConfirma.value = ""; delBtn.disabled = true; delStatus.textContent = "";
   });

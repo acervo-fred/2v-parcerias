@@ -34,6 +34,17 @@ export function bucketDe(responsavel) {
   return RESPONSAVEIS_FIXOS.includes(responsavel) ? responsavel : "Outros";
 }
 
+// responsáveis de uma ação MENOS quem pertence ao bucket indicado — usado
+// no "A Fazer" (ver kanban-proximos-passos.js) pra excluir a ação só pra
+// UM responsável (não todos) quando ela tem mais de um. Fred/Manu/Laura
+// têm sempre exatamente 1 nome de verdade em cada bucket (só o próprio
+// nome mapeia pra ele); "Outros" pode juntar mais de um nome
+// personalizado — remove todos de uma vez, já que a lista já mostra esse
+// grupo numa linha só, sem distinguir entre eles.
+export function responsaveisSemBucket(acao, bucket) {
+  return responsaveisDe(acao).filter((r) => bucketDe(r) !== bucket);
+}
+
 /* Uma ação pode ter vários responsáveis (`responsaveis: string[]`) —
    quem grava sempre escreve nesse campo. Compatibilidade: ações
    antigas só têm o campo único `responsavel` (string); só cai nesse
@@ -76,7 +87,7 @@ export async function garantirPartner(id, parceiro, partnersById, campos) {
     return store.updatePartner(id, campos);
   }
   return store.addPartner(id, {
-    name: parceiro.nome, type: parceiro.tipo || "", address: parceiro.local || "",
+    name: parceiro.nome, type: parceiro.tipo || "", typeDetalhe: parceiro.tipoDetalhe || "", address: parceiro.local || "",
     responsavel: parceiro.responsavel || "", contactRaw: parceiro.contato || "",
     stage: "lead", ...campos,
   });

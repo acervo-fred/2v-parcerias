@@ -16,10 +16,14 @@ import { store } from "../data/store.js";
 import { esc } from "../ui/dom.js";
 import { badge } from "../ui/badges.js";
 import { abrirNovoProspecto, abrirFecharParceria } from "./cadastros.js";
+import { geocodeEndereco, distanciaMetros, formatarDistancia } from "../util/geocoding.js";
 
 export async function renderProspeccao(app) {
-  const [negocios, partners] = await Promise.all([store.listParceiros(), store.listPartners()]);
+  const [negocios, partners, loja] = await Promise.all([
+    store.listParceiros(), store.listPartners(), store.getLojaAtual(),
+  ]);
   const partnersById = Object.fromEntries(partners.map((p) => [p.id, p]));
+  const lojaComMapa = !!(loja?.lat != null && loja?.lng != null);
 
   let busca = "";
 
@@ -33,6 +37,10 @@ export async function renderProspeccao(app) {
         <button class="btn btn-primary" data-act="novo">+ Nova prospecção</button>
       </div>
     </div>
+
+    ${lojaComMapa
+      ? `<div class="chart-card" style="margin-bottom:16px;padding:0"><div id="prospeccao-mapa"></div></div>`
+      : `<div class="chart-card" style="margin-bottom:16px"><div id="prospeccao-mapa-aviso" class="muted">Defina o endereço da loja em <a href="#/backup">Backup e dados → Editar lojas</a> pra habilitar o mapa de prospecção.</div></div>`}
 
     <div class="toolbar" style="margin-bottom:16px">
       <input class="input" id="busca" type="search" placeholder="Buscar por nome, local ou responsável…" />
@@ -54,7 +62,7 @@ export async function renderProspeccao(app) {
     ).sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
 
     lista.innerHTML = arr.length
-      ? arr.map((p) => row(p, partnersById)).join("")
+      ? arr.map((p) => row(p, partnersById, loja)).join("")
       : `<div class="empty">Nenhum negócio encontrado.</div>`;
 
     app.querySelector("#contador").textContent = `${arr.length} negócios`;
@@ -83,10 +91,62 @@ export async function renderProspeccao(app) {
     }
     location.hash = `#/parceiro/${id}`;
   });
+
+  if (!lojaComMapa) return;
+  inicializarMapa(loja, negocios, desenhar);
 }
 
-function row(p, partnersById) {
-  const partes = [p.tipo, p.local, p.responsavel, p.contato].filter(Boolean);
+/* mapa Leaflet (via CDN, ver index.html) + geocodificação preguiçosa dos
+   negócios que ainda não têm coordenada cacheada. Usa L.circleMarker (SVG
+   nativo do Leaflet) em vez do ícone padrão pra não depender dos arquivos
+   de imagem marker-icon.png que o pacote normalmente serve — só carregamos
+   o CSS/JS do Leaflet via CDN, sem os assets extras. */
+function inicializarMapa(loja, negocios, desenhar) {
+  const mapa = L.map("prospeccao-mapa", { scrollWheelZoom: false }).setView([loja.lat, loja.lng], 15);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: "© OpenStreetMap contributors", maxZoom: 19,
+  }).addTo(mapa);
+  L.circleMarker([loja.lat, loja.lng], { radius: 10, color: "#fff", weight: 2, fillColor: "#376946", fillOpacity: 1 })
+    .addTo(mapa).bindPopup(`<strong>${esc(loja.nome)}</strong><br>Sua loja`);
+
+  let marcadores = [];
+  function atualizarPins() {
+    marcadores.forEach((m) => mapa.removeLayer(m));
+    marcadores = negocios.filter((p) => p.lat != null && p.lng != null).map((p) => {
+      const dist = formatarDistancia(distanciaMetros(loja.lat, loja.lng, p.lat, p.lng));
+      return L.circleMarker([p.lat, p.lng], { radius: 6, color: "#fff", weight: 1.5, fillColor: "#2a65d7", fillOpacity: 0.9 })
+        .addTo(mapa)
+        .bindPopup(`<strong>${esc(p.nome)}</strong><br>${esc(p.tipo || "")}<br>${esc(dist)}`);
+    });
+  }
+  atualizarPins();
+
+  // fila sequencial (rate-limit já garantido por geocodeEndereco) — só
+  // quem tem endereço preenchido e ainda não foi geocodificado com o
+  // endereço atual (localGeocodado divergente cobre tanto "nunca tentou"
+  // quanto "endereço mudou desde a última tentativa"); falha também
+  // grava localGeocodado, pra não bater na mesma tentativa ruim de novo
+  // a cada vez que a tela abre.
+  (async () => {
+    const pendentes = negocios.filter((p) => (p.local || "").trim() && p.localGeocodado !== p.local);
+    for (const p of pendentes) {
+      const coord = await geocodeEndereco(p.local, { lat: loja.lat, lng: loja.lng });
+      p.lat = coord?.lat ?? null;
+      p.lng = coord?.lng ?? null;
+      p.localGeocodado = p.local;
+      store.updateParceiro(p.id, { lat: p.lat, lng: p.lng, localGeocodado: p.local })
+        .catch((err) => console.error("Falha ao salvar geocode do endereço:", err));
+      desenhar();
+      atualizarPins();
+    }
+  })();
+}
+
+function row(p, partnersById, loja) {
+  const partes = [p.tipo, p.tipoDetalhe, p.local, p.responsavel, p.contato].filter(Boolean);
+  if (loja?.lat != null && loja?.lng != null && p.lat != null && p.lng != null) {
+    partes.push(formatarDistancia(distanciaMetros(loja.lat, loja.lng, p.lat, p.lng)));
+  }
   const stage = partnersById[p.id]?.stage;
   const acao = p.ehParceiro
     ? `<a class="btn btn-sm btn-ghost" href="#/parceiro/${esc(p.id)}">Ver parceiro →</a>`

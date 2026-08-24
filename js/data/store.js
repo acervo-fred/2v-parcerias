@@ -122,7 +122,7 @@ const localStore = {
     persistir();
     return structuredClone(novo);
   },
-  async updateLoja() { throw new Error("Editar loja ainda não está disponível no modo local (sem Firestore)."); },
+  async updateLoja(id, campos) { return atualizar(db.lojas, id, campos); },
   async wipeLancamentosDaLoja() { throw new Error("Apagar base de dados da loja ainda não está disponível no modo local (sem Firestore)."); },
   async removeLoja() { throw new Error("Excluir loja ainda não está disponível no modo local (sem Firestore)."); },
 
@@ -174,6 +174,7 @@ const localStore = {
       local: dados.local || "",
       contato: dados.contato || "",
       tipo: dados.tipo || "",
+      tipoDetalhe: dados.tipoDetalhe || "",
       responsavel: dados.responsavel || "",
       observacoes: dados.observacoes || "",
       statusProspeccao: dados.statusProspeccao || "Prospecção",
@@ -181,6 +182,7 @@ const localStore = {
       ehParceiro: false,
       cupom: "", statusCupom: "", periodoDesconto: "",
       dataInicio: "", dataVencimento: "",
+      lat: null, lng: null, localGeocodado: "",
     };
     db.parceiros.push(novo);
     persistir();

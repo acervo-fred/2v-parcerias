@@ -16,7 +16,7 @@ import { acaoRowHtml } from "../ui/acao-row.js";
 import {
   carregarFunil, garantirPartner, nivelUrgencia,
   criarAcao, adicionarAcao, editarAcao, concluirAcao, excluirAcao,
-  corDe, bucketDe, responsaveisDe, MES_NOMES,
+  corDe, bucketDe, responsaveisDe, responsaveisSemBucket, MES_NOMES,
 } from "../data/funil.js";
 
 const DIAS_SEMANA = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
@@ -81,7 +81,7 @@ function listaAgrupadaHtml(pares, vazioTexto, concluida) {
         return `
           <div class="acoes-data-label${nivel ? ` acoes-data-label--${nivel}` : ""}">${esc(formatDataBR(data))}</div>
           <div class="list-card" style="margin-bottom:14px">
-            ${lista.map(({ card, acao }) => acaoRowHtml(card.id, acao, { concluida, nome: card.name })).join("")}
+            ${lista.map(({ card, acao }) => acaoRowHtml(card.id, acao, { concluida, nome: card.name, responsavelContexto: responsavel })).join("")}
           </div>
         `;
       }).join("")}
@@ -153,8 +153,15 @@ export async function renderProximosPassos(app) {
       } else if (act === "editar") {
         abrirFormAcao(todosCards, parceiros, partnersById, { card: CARD_GERAL, acao });
       } else if (act === "excluir") {
-        if (!confirm(`Excluir a ação "${acao.description}"?`)) return;
-        await store.removeTaskGeral(acaoId);
+        const bucket = row.dataset.responsavel;
+        const restantes = bucket ? responsaveisSemBucket(acao, bucket) : [];
+        if (bucket && restantes.length) {
+          if (!confirm(`Remover "${acao.description}" de ${bucket}? A ação continua para os outros responsáveis.`)) return;
+          await store.updateTaskGeral(acaoId, { responsaveis: restantes });
+        } else {
+          if (!confirm(`Excluir a ação "${acao.description}"?`)) return;
+          await store.removeTaskGeral(acaoId);
+        }
         avisarMudanca();
       }
       return;
@@ -170,8 +177,15 @@ export async function renderProximosPassos(app) {
     } else if (act === "editar") {
       abrirFormAcao(todosCards, parceiros, partnersById, { card, acao });
     } else if (act === "excluir") {
-      if (!confirm(`Excluir a ação "${acao.description}"?`)) return;
-      await excluirAcao(cardId, partner, acaoId);
+      const bucket = row.dataset.responsavel;
+      const restantes = bucket ? responsaveisSemBucket(acao, bucket) : [];
+      if (bucket && restantes.length) {
+        if (!confirm(`Remover "${acao.description}" de ${bucket}? A ação continua para os outros responsáveis.`)) return;
+        await editarAcao(cardId, partner, acaoId, { responsaveis: restantes });
+      } else {
+        if (!confirm(`Excluir a ação "${acao.description}"?`)) return;
+        await excluirAcao(cardId, partner, acaoId);
+      }
       avisarMudanca();
     }
   }

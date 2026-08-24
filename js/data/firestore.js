@@ -177,10 +177,11 @@ export const firestoreStore = {
     const novo = {
       lojaId,
       area: dados.area || "", nome: dados.nome, local: dados.local || "",
-      contato: dados.contato || "", tipo: dados.tipo || "", responsavel: dados.responsavel || "",
+      contato: dados.contato || "", tipo: dados.tipo || "", tipoDetalhe: dados.tipoDetalhe || "", responsavel: dados.responsavel || "",
       observacoes: dados.observacoes || "", statusProspeccao: dados.statusProspeccao || "Prospecção",
       dataCadastro: new Date().toISOString().slice(0, 10), ehParceiro: false,
       cupom: "", statusCupom: "", periodoDesconto: "", dataInicio: "", dataVencimento: "",
+      lat: null, lng: null, localGeocodado: "",
     };
     const ref = await addDoc(collection(fdb, COLLECTIONS.parceiros), novo);
     return { id: ref.id, ...novo };
@@ -277,7 +278,7 @@ export const firestoreStore = {
     const agora = hojeISO();
     const novo = {
       lojaId,
-      name: dados.name || "", type: dados.type || "", area: dados.area || "",
+      name: dados.name || "", type: dados.type || "", typeDetalhe: dados.typeDetalhe || "", area: dados.area || "",
       address: dados.address || "", contact: dados.contact || {}, contactRaw: dados.contactRaw || "",
       responsavel: dados.responsavel || "", stage: dados.stage || "ativo",
       stageUpdatedAt: agora, nextAction: dados.nextAction ?? null, tags: [], archived: false,

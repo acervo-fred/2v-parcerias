@@ -14,7 +14,7 @@ import { store } from "../data/store.js";
 import { esc } from "../ui/dom.js";
 import { openModal, fieldText, fieldTextarea, readValue } from "../ui/modal.js";
 import { fieldResponsavel, wireResponsavelField, readResponsaveis } from "../ui/campo-responsavel.js";
-import { corDe, bucketDe, responsaveisDe, MES_NOMES } from "../data/funil.js";
+import { corDe, bucketDe, responsaveisDe, responsaveisSemBucket, MES_NOMES } from "../data/funil.js";
 
 function avisarMudanca() {
   window.dispatchEvent(new CustomEvent("data-changed"));
@@ -130,7 +130,7 @@ export async function renderEquipe(app) {
     const task = tasks.find((t) => t.id === bar.dataset.taskId);
     if (!task) return;
     const loja = lojasOrdenadas.find((l) => l.id === task.lojaId);
-    abrirEditarTarefa(task, loja?.nome || "");
+    abrirEditarTarefa(task, loja?.nome || "", bar.dataset.responsavel);
   });
 }
 
@@ -186,7 +186,7 @@ function subLinhaHtml(responsavel, itens, meses) {
         ${finalPorPista.map((_, pistaIdx) => `
           <div class="mapa-pista" style="grid-template-columns:repeat(${totalCols},1fr)">
             ${comPista.filter((t) => t.pista === pistaIdx).map((t) => `
-              <div class="mapa-bar pp-bar--${corDe(responsavel)}" style="grid-column:${t.idxIni + 1}/${t.idxFim + 2}" data-task-id="${esc(t.id)}" title="${esc(t.description)}">${esc(t.description)}</div>
+              <div class="mapa-bar pp-bar--${corDe(responsavel)}" style="grid-column:${t.idxIni + 1}/${t.idxFim + 2}" data-task-id="${esc(t.id)}" data-responsavel="${esc(responsavel)}" title="${esc(t.description)}">${esc(t.description)}</div>
             `).join("")}
           </div>
         `).join("")}
@@ -254,7 +254,14 @@ async function abrirCadastrarAcaoEquipe(lojasOrdenadas) {
   });
 }
 
-async function abrirEditarTarefa(task, lojaNome) {
+// responsavelContexto: sub-linha (Fred/Manu/Laura/Outros) de onde a barra
+// clicada veio — quando a demanda tem mais de um responsável, "Excluir"
+// remove só esse (a demanda continua pros outros); só apaga de vez quando
+// sobra ninguém, igual ao mesmo ajuste já feito no "A Fazer" (ver
+// js/views/kanban-proximos-passos.js).
+async function abrirEditarTarefa(task, lojaNome, responsavelContexto) {
+  const restantes = responsavelContexto ? responsaveisSemBucket(task, responsavelContexto) : [];
+  const removeSoDoContexto = responsavelContexto && restantes.length > 0;
   openModal({
     title: "Editar demanda",
     subtitle: lojaNome,
@@ -268,6 +275,18 @@ async function abrirEditarTarefa(task, lojaNome) {
       ${fieldResponsavel(responsaveisDe(task))}
     `,
     onMount: wireResponsavelField,
+    onDelete: async () => {
+      if (removeSoDoContexto) {
+        await store.updateTaskGeral(task.id, { responsaveis: restantes });
+      } else {
+        await store.removeTaskGeral(task.id);
+      }
+      avisarMudanca();
+    },
+    deleteLabel: removeSoDoContexto ? `🗑 Remover de ${responsavelContexto}` : "🗑 Excluir",
+    deleteConfirm: removeSoDoContexto
+      ? `Remover "${task.description}" de ${responsavelContexto}? A demanda continua para os outros responsáveis.`
+      : `Excluir a demanda "${task.description}"? Isso apaga pra todos os responsáveis. Não dá pra desfazer.`,
     onSubmit: async (form) => {
       const description = readValue(form, "description");
       const dueDate = readValue(form, "dueDate");

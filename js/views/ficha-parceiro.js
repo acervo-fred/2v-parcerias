@@ -71,7 +71,7 @@ export async function renderFichaParceiro(app, id) {
     <div class="detail-head">
       <div>
         <h1 class="page-title">${esc(partner.name)}</h1>
-        <div class="page-sub">${badge(stageMeta.label, stageMeta.cor)} ${esc(partner.type || "—")}</div>
+        <div class="page-sub">${badge(stageMeta.label, stageMeta.cor)} ${esc([partner.type, partner.typeDetalhe].filter(Boolean).join(" — ") || "—")}</div>
       </div>
       <div class="row-end">
         <button class="btn edit-only" data-act="editar-cadastro">Editar cadastro</button>
@@ -282,7 +282,10 @@ async function abrirEditarCadastro(partner) {
     wide: true,
     bodyHtml: `
       ${fieldText("name", "Nome do negócio", { required: true, value: partner.name || "" })}
-      ${fieldSelect("type", "Tipo", listas.tipoNegocio, { value: partner.type || listas.tipoNegocio[0]?.valor })}
+      <div class="field-2col">
+        ${fieldSelect("type", "Tipo", listas.tipoNegocio, { value: partner.type || listas.tipoNegocio[0]?.valor })}
+        ${fieldText("typeDetalhe", "Especificar (opcional)", { value: partner.typeDetalhe || "", placeholder: "Ex.: Pilates" })}
+      </div>
       ${fieldText("address", "Endereço", { value: partner.address || "" })}
       ${fieldText("responsavel", "Responsável", { value: partner.responsavel || "" })}
       <div class="field-2col">
@@ -299,6 +302,7 @@ async function abrirEditarCadastro(partner) {
       await store.updatePartner(partner.id, {
         name,
         type: readValue(form, "type"),
+        typeDetalhe: readValue(form, "typeDetalhe"),
         address: readValue(form, "address"),
         responsavel: readValue(form, "responsavel"),
         contact: {

@@ -583,6 +583,13 @@ button { font: inherit; }
 }
 .chart-card h3 { font-family: var(--font-display); font-size: 16px; font-weight: 400; color: var(--accent-dark); margin: 0; }
 .chart-card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+
+/* mapa de Prospecção (Leaflet) — overflow:hidden pra não vazar por cima
+   do border-radius do .chart-card pai; z-index:0 evita que os tiles do
+   Leaflet (que criam seu próprio contexto de empilhamento) apareçam por
+   cima de modal/sidebar. */
+#prospeccao-mapa { height: 340px; border-radius: var(--r-md); overflow: hidden; z-index: 0; }
+#prospeccao-mapa-aviso { padding: 24px; text-align: center; }
 .chart-toggle {
   background: transparent; border: 1px solid var(--border-strong); border-radius: 999px;
   padding: 4px 12px; font-size: 11.5px; font-weight: 700; color: var(--text-soft); cursor: pointer;
