@@ -45,21 +45,39 @@ function mesesDoIntervalo(tasks) {
   }
   return meses;
 }
+// cada mês é dividido em SUBCOLS_POR_MES colunas (~semanas) pra uma
+// tarefa que termina, por exemplo, na 2ª semana do mês não ocupar
+// visualmente o mês inteiro — só a fração correspondente. O cabeçalho,
+// as guias verticais e as pistas de barra usam todos a mesma grade fina
+// (meses.length * SUBCOLS_POR_MES colunas), garantindo alinhamento
+// pixel-a-pixel entre eles; só a linha de guia de fim de mês (a cada 4
+// colunas) fica visível, as subdivisões internas da semana não desenham
+// borda pra não poluir visualmente.
+const SUBCOLS_POR_MES = 4;
+
 // linhas verticais finas dividindo as colunas de mês — UMA linha contínua
 // cobrindo a altura inteira do mapa (não por linha/pista), com z-index
 // negativo (ver .mapa-col-guias no CSS) pra ficar sempre atrás de
 // qualquer conteúdo — título de loja, texto de barra etc. — sem nunca
 // tampar palavra nenhuma, já que quem cobre a linha é sempre o que está
 // por cima dela, não o contrário.
-function colGuiasHtml(n) {
+function colGuiasHtml(numMeses) {
+  const n = numMeses * SUBCOLS_POR_MES;
   return `<div class="mapa-col-guias" style="grid-template-columns:repeat(${n},1fr)">${
-    Array.from({ length: n }).map(() => `<div class="mapa-col-guia"></div>`).join("")
+    Array.from({ length: n }).map((_, i) => `<div class="mapa-col-guia${(i + 1) % SUBCOLS_POR_MES === 0 ? " mapa-col-guia--mes" : ""}"></div>`).join("")
   }</div>`;
 }
 
-function indiceMes(meses, iso) {
-  const [ano, mes] = iso.slice(0, 7).split("-").map(Number);
-  return meses.findIndex((m) => m.ano === ano && m.mes === mes);
+// coluna absoluta (0-based) na grade fina de meses.length*SUBCOLS_POR_MES,
+// combinando o mês da data com a fração do mês em que o dia cai (dia 1
+// do mês → subcoluna 0, fim do mês → última subcoluna).
+function subColunaDeData(meses, iso) {
+  const [ano, mes, dia] = iso.slice(0, 10).split("-").map(Number);
+  const idxMes = meses.findIndex((m) => m.ano === ano && m.mes === mes);
+  if (idxMes === -1) return null;
+  const diasNoMes = new Date(ano, mes, 0).getDate();
+  const sub = Math.min(SUBCOLS_POR_MES - 1, Math.floor((dia - 1) * SUBCOLS_POR_MES / diasNoMes));
+  return idxMes * SUBCOLS_POR_MES + sub;
 }
 
 export async function renderEquipe(app) {
@@ -98,8 +116,8 @@ export async function renderEquipe(app) {
     ${colGuiasHtml(meses.length)}
     <div class="mapa-cabecalho">
       <div class="mapa-cabecalho-label"></div>
-      <div class="mapa-cabecalho-meses" style="grid-template-columns:repeat(${meses.length},1fr)">
-        ${meses.map((m) => `<div class="mapa-mes">${esc(MES_NOMES[m.mes - 1].slice(0, 3).toUpperCase())}</div>`).join("")}
+      <div class="mapa-cabecalho-meses" style="grid-template-columns:repeat(${meses.length * SUBCOLS_POR_MES},1fr)">
+        ${meses.map((m, i) => `<div class="mapa-mes" style="grid-column:${i * SUBCOLS_POR_MES + 1}/${i * SUBCOLS_POR_MES + SUBCOLS_POR_MES + 1}">${esc(MES_NOMES[m.mes - 1].slice(0, 3).toUpperCase())}</div>`).join("")}
       </div>
     </div>
     ${lojasOrdenadas.map((loja) => lojaBlocoHtml(loja, porLoja.get(loja.id), meses)).join("")}
@@ -138,12 +156,13 @@ function lojaBlocoHtml(loja, tasksDaLoja, meses) {
 }
 
 function subLinhaHtml(responsavel, itens, meses) {
+  const totalCols = meses.length * SUBCOLS_POR_MES;
   const posicionadas = itens
     .map((t) => {
       const fim = t.dueDate;
       const inicio = t.dataInicio && t.dataInicio <= fim ? t.dataInicio : fim;
-      const idxIni = Math.max(0, indiceMes(meses, inicio));
-      const idxFim = Math.min(meses.length - 1, indiceMes(meses, fim));
+      const idxIni = Math.max(0, subColunaDeData(meses, inicio) ?? 0);
+      const idxFim = Math.min(totalCols - 1, subColunaDeData(meses, fim) ?? totalCols - 1);
       return { ...t, idxIni, idxFim };
     })
     .sort((a, b) => a.idxIni - b.idxIni);
@@ -165,7 +184,7 @@ function subLinhaHtml(responsavel, itens, meses) {
       <div class="mapa-sub-nome"><span class="pp-cor-dot pp-cor-dot--${corDe(responsavel)}"></span>${esc(responsavel)}</div>
       <div class="mapa-sub-pistas">
         ${finalPorPista.map((_, pistaIdx) => `
-          <div class="mapa-pista" style="grid-template-columns:repeat(${meses.length},1fr)">
+          <div class="mapa-pista" style="grid-template-columns:repeat(${totalCols},1fr)">
             ${comPista.filter((t) => t.pista === pistaIdx).map((t) => `
               <div class="mapa-bar pp-bar--${corDe(responsavel)}" style="grid-column:${t.idxIni + 1}/${t.idxFim + 2}" data-task-id="${esc(t.id)}" title="${esc(t.description)}">${esc(t.description)}</div>
             `).join("")}
@@ -183,8 +202,8 @@ function crmBlocoHtml(meses) {
       <div class="mapa-sub-linha">
         <div class="mapa-sub-nome"></div>
         <div class="mapa-sub-pistas">
-          <div class="mapa-pista" style="grid-template-columns:repeat(${meses.length},1fr)">
-            <div class="mapa-bar mapa-bar--crm" style="grid-column:1/${meses.length + 1}">Manutenção do CRM, ajustes, alimentação e análise de dados</div>
+          <div class="mapa-pista" style="grid-template-columns:repeat(${meses.length * SUBCOLS_POR_MES},1fr)">
+            <div class="mapa-bar mapa-bar--crm" style="grid-column:1/${meses.length * SUBCOLS_POR_MES + 1}">Manutenção do CRM, ajustes, alimentação e análise de dados</div>
           </div>
         </div>
       </div>

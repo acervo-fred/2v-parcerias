@@ -382,10 +382,14 @@ button { font: inherit; }
    js/views/equipe.js) e alinhado aos 160px da coluna de rótulo, então
    fica pixel-perfect com os grids de verdade. z-index negativo garante
    que a linha sempre fica ATRÁS de título de loja, texto de barra etc.
-   — nunca por cima, então nunca tampa palavra nenhuma. */
+   — nunca por cima, então nunca tampa palavra nenhuma. A grade tem
+   meses.length*SUBCOLS_POR_MES colunas (mês dividido em ~semanas, pra
+   uma tarefa não ocupar visualmente o mês inteiro), mas só a divisória
+   de FIM DE MÊS (classe --mes) desenha borda — as subdivisões internas
+   da semana ficam sem linha, pra não poluir. */
 .mapa-col-guias { position: absolute; top: 0; bottom: 0; left: 160px; right: 0; display: grid; gap: 4px; pointer-events: none; z-index: -1; }
-.mapa-col-guia { border-right: 1px solid var(--border); }
-.mapa-col-guia:last-child { border-right: none; }
+.mapa-col-guia--mes { border-right: 1px solid var(--border); }
+.mapa-col-guia--mes:last-child { border-right: none; }
 
 .mapa-loja { padding: 14px 0; border-bottom: 1px solid var(--border); }
 .mapa-loja:last-of-type { border-bottom: none; }

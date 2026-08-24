@@ -722,8 +722,8 @@ function wireBarDrillDown(container) {
    cohort, quem continuou usando (retidos) e quem parou (perdidos)?".
    "Perdidos" mostra o faturamento que o cupom tinha no período anterior
    (não no atual, onde por definição ele não teve uso). Cada linha de
-   "Perdidos"/"Novos" ganha marcadores sobrescritos ¹/² conforme o cupom
-   teve algum uso dentro do período de 50% do grupo (cupomEhEspecial,
+   "Retidos"/"Perdidos"/"Novos" ganha marcadores sobrescritos ¹/² conforme
+   o cupom teve algum uso dentro do período de 50% do grupo (cupomEhEspecial,
    mesmo critério do resto do Dashboard) no período selecionado (¹) e/ou
    no período anterior (²). */
 function calcularTendencias(doPeriodo, doPeriodoAnterior, chavePorParceiroId, porChave, primeiraDataCupom, deAnt, ateAnt, porId, porIdGrupo) {
@@ -800,8 +800,8 @@ function desenharTendencias(app, doPeriodo, doPeriodoAnterior, comparavel, chave
     elRetidos.innerHTML = listaTendenciaHtml(perdidos, "Nenhum cupom perdido nesse período.", grupos, true);
   } else {
     tituloEl.textContent = "Tendências — Retidos";
-    descEl.textContent = "Cupons novos no período anterior que continuaram sendo usados neste";
-    elRetidos.innerHTML = listaTendenciaHtml(retidos, "Nenhum cupom retido nesse período.", grupos, false);
+    descEl.innerHTML = "Cupons novos no período anterior que continuaram sendo usados neste;<br>1: Cupons com 50% no período selecionado.<br>2: Cupons com 50% no período anterior.";
+    elRetidos.innerHTML = listaTendenciaHtml(retidos, "Nenhum cupom retido nesse período.", grupos, true);
   }
   elNovos.innerHTML = listaTendenciaHtml(novos, "Nenhum cupom novo nesse período.", grupos, true);
   wireBarDrillDown(elRetidos);

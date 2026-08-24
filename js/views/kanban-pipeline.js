@@ -125,6 +125,15 @@ export async function renderKanbanPipeline(app) {
     desenharBoard();
   });
 
+  /* ---------- clique no card abre a ficha do parceiro (drag continua
+     funcionando: dragstart só marca a intenção de arrastar, o clique
+     em si dispara normalmente no dragend/click do mouse parado). ---------- */
+  board.addEventListener("click", (e) => {
+    const card = e.target.closest(".funil-card");
+    if (!card) return;
+    location.hash = `#/parceiro/${card.dataset.id}`;
+  });
+
   /* ---------- drag-and-drop (delegado no board inteiro) ---------- */
   board.addEventListener("dragstart", (e) => {
     const card = e.target.closest(".funil-card");
