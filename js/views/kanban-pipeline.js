@@ -55,7 +55,7 @@ function proximaPendente(nextActions) {
 }
 
 export async function renderKanbanPipeline(app) {
-  const { partners, parceiros, partnersById, leadCards, todosCards } = await carregarFunil();
+  const { partners, parceiros, partnersById, todosCards } = await carregarFunil();
 
   let filtroTipo = "Todos";
   let filtroDias = "0";
@@ -72,7 +72,7 @@ export async function renderKanbanPipeline(app) {
       </div>
     </div>
 
-    ${funilProgressoHtml(leadCards, parceiros, partners)}
+    <div id="funil-progresso-wrap"></div>
 
     <div class="toolbar" style="margin-bottom:16px">
       <select class="input" id="filtro-tipo" style="max-width:220px">
@@ -86,7 +86,15 @@ export async function renderKanbanPipeline(app) {
     <div class="funil-board" id="kanban-board"></div>
   `;
 
+  const progressoWrap = app.querySelector("#funil-progresso-wrap");
   const board = app.querySelector("#kanban-board");
+
+  // reconta em cima de todosCards (a mesma lista que o drag muda),
+  // pra não depender de partners/parceiros ficarem sincronizados à parte.
+  function desenharProgresso() {
+    progressoWrap.innerHTML = funilProgressoHtml(todosCards);
+  }
+  desenharProgresso();
 
   function desenharBoard() {
     const filtrados = todosCards.filter((p) => {
@@ -182,6 +190,7 @@ export async function renderKanbanPipeline(app) {
     p.stage = novoStage;
     p.stageUpdatedAt = agora;
     desenharBoard();
+    desenharProgresso();
     try {
       const origem = parceiros.find((x) => x.id === id);
       const partner = await garantirPartner(id, origem, partnersById, { stage: novoStage, stageUpdatedAt: agora });
@@ -191,6 +200,7 @@ export async function renderKanbanPipeline(app) {
       p.stage = stageAnterior;
       p.stageUpdatedAt = stageUpdatedAtAnterior;
       desenharBoard();
+      desenharProgresso();
       alert("Não foi possível mover o parceiro. Confira se você está logado com uma conta autorizada.");
     }
   });
@@ -220,12 +230,12 @@ const ESTAGIOS_FUNIL = [
     icone: `<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>`,
   },
 ];
-function funilProgressoHtml(leadCards, parceiros, partners) {
+function funilProgressoHtml(todosCards) {
   const numeros = {
-    lead: leadCards.length,
-    negociacao: partners.filter((p) => p.stage === "negociacao").length,
-    ativo: parceiros.filter((p) => p.ehParceiro).length,
-    perdido: partners.filter((p) => p.stage === "perdido").length,
+    lead: todosCards.filter((p) => p.stage === "lead").length,
+    negociacao: todosCards.filter((p) => p.stage === "negociacao").length,
+    ativo: todosCards.filter((p) => p.stage === "ativo").length,
+    perdido: todosCards.filter((p) => p.stage === "perdido").length,
   };
   return `<div class="funil-progresso">
     ${ESTAGIOS_FUNIL.map((e, i) => `
