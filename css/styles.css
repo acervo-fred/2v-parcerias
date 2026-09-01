@@ -398,57 +398,95 @@ button { font: inherit; }
 .pp-bar--violet { background: var(--c-violet-bg); color: var(--c-violet-fg); }
 .pp-bar--gray   { background: var(--c-gray-bg);   color: var(--c-gray-fg); }
 
-/* ================= MAPA DA EQUIPE (aba Equipe) ================= */
-.mapa-equipe { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 20px; overflow-x: auto; position: relative; z-index: 0; }
+/* ================= MAPA DA EQUIPE (aba Equipe) =================
+   A coluna de loja/responsável (160px) fica fixa na tela (position:
+   sticky;left:0) enquanto o painel de meses ocupa o resto da largura
+   disponível. Até --meses-visiveis (3) meses, eles esticam pra preencher
+   a janela (--w-flex/--w-abs abaixo caem no ramo "100% - rótulo"); acima
+   disso, cada mês trava na largura que teria com exatamente 3 meses
+   preenchendo a tela (ramo "n-meses × largura-de-1/3 da tela"), e o
+   excesso rola pro lado dentro do mesmo scroll horizontal de
+   .mapa-equipe — sem esticar a página. --n-meses/--meses-visiveis vêm
+   do JS (ver renderEquipe em js/views/equipe.js) via style inline.
+   gap:0 nos grids finos (pistas/cabeçalho/guias) pra as barras ficarem
+   visualmente contínuas entre subcolunas de dias vizinhos — só a
+   divisória de fim de mês desenha borda. */
+.mapa-equipe {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg);
+  padding: 20px; overflow-x: auto; position: relative; z-index: 0;
+  /* item de flex (cabeçalho/pistas): % resolve contra a content-box do
+     próprio .mapa-equipe, então só o rótulo (160px) precisa ser
+     descontado */
+  --w-flex: max(calc(100% - 160px), calc(var(--n-meses) * (100% - 160px) / var(--meses-visiveis)));
+  /* filho absoluto (guias/linha de hoje): % resolve contra a padding-box
+     (inclui os 40px de padding lateral), então descontamos rótulo+padding
+     pra chegar na MESMA largura de --w-flex */
+  --w-abs: max(calc(100% - 200px), calc(var(--n-meses) * (100% - 200px) / var(--meses-visiveis)));
+}
 .mapa-cabecalho { display: flex; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
-.mapa-cabecalho-label { width: 160px; flex-shrink: 0; }
-.mapa-cabecalho-meses { flex: 1; display: grid; gap: 4px; min-width: 480px; }
+.mapa-cabecalho-label {
+  width: 160px; flex-shrink: 0;
+  position: sticky; left: 0; z-index: 3; background: var(--surface);
+}
+.mapa-cabecalho-meses { flex-shrink: 0; width: var(--w-flex); display: grid; gap: 0; }
 .mapa-mes { font-size: 11px; font-weight: 800; letter-spacing: 0.4px; text-transform: uppercase; color: var(--text-faint); text-align: center; }
 
 /* linha vertical fina e contínua dividindo as colunas de mês — UM grid
    absoluto cobrindo a altura inteira de .mapa-equipe (não por linha),
    com o mesmo template/gap do grid real (ver colGuiasHtml em
-   js/views/equipe.js) e alinhado aos 160px da coluna de rótulo, então
-   fica pixel-perfect com os grids de verdade. z-index negativo garante
-   que a linha sempre fica ATRÁS de título de loja, texto de barra etc.
-   — nunca por cima, então nunca tampa palavra nenhuma. A grade tem
-   meses.length*SUBCOLS_POR_MES colunas (mês dividido em ~semanas, pra
-   uma tarefa não ocupar visualmente o mês inteiro), mas só a divisória
-   de FIM DE MÊS (classe --mes) desenha borda — as subdivisões internas
-   da semana ficam sem linha, pra não poluir. */
-.mapa-col-guias { position: absolute; top: 0; bottom: 0; left: 160px; right: 0; display: grid; gap: 4px; pointer-events: none; z-index: -1; }
+   js/views/equipe.js), então fica pixel-perfect com os grids de verdade.
+   z-index negativo garante que a linha sempre fica ATRÁS de qualquer
+   conteúdo — título de loja, texto de barra etc. — sem nunca tampar
+   palavra nenhuma. left:180px = 160px do rótulo + 20px do padding lateral
+   de .mapa-equipe (elemento absoluto mede a partir da padding-box, não da
+   content-box — sem esse ajuste a guia nasce 20px à esquerda de onde o
+   grid de verdade começa). A grade tem meses.length*SUBCOLS_POR_MES
+   colunas (mês dividido em ~dias, pra uma tarefa não ocupar visualmente
+   o mês inteiro), mas só a divisória de FIM DE MÊS (classe --mes)
+   desenha borda — as subdivisões internas do mês ficam sem linha, pra
+   não poluir. */
+.mapa-col-guias { position: absolute; top: 0; bottom: 0; left: 180px; width: var(--w-abs); display: grid; gap: 0; pointer-events: none; z-index: -1; }
 .mapa-col-guia--mes { border-right: 1px solid var(--border); }
 .mapa-col-guia--mes:last-child { border-right: none; }
 
 /* linha vermelha do dia de hoje — mesma caixa de coordenadas dos guias
-   de mês acima (left:160px…right:0), mas com a marca em si (a linha)
-   num filho posicionado por % contínuo (ver hojeLinhaHtml em
-   js/views/equipe.js), não travado nas subcolunas de semana. z-index
-   acima do conteúdo pra sempre aparecer, mesmo sobre uma barra. */
-.mapa-linha-hoje { position: absolute; top: 0; bottom: 0; left: 160px; right: 0; pointer-events: none; z-index: 2; }
+   de mês acima (left:180px, mesma --w-abs), mas com a marca em si (a
+   linha) num filho posicionado por % contínuo (ver hojeLinhaHtml em
+   js/views/equipe.js), não travado nas subcolunas. z-index acima do
+   conteúdo pra sempre aparecer, mesmo sobre uma barra — mas abaixo da
+   coluna fixa de loja/responsável, que precisa cobri-la ao rolar. */
+.mapa-linha-hoje { position: absolute; top: 0; bottom: 0; left: 180px; width: var(--w-abs); pointer-events: none; z-index: 2; }
 .mapa-linha-hoje-marca { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--c-red-fg); }
 
 .mapa-loja { padding: 14px 0; border-bottom: 1px solid var(--border); }
 .mapa-loja:last-of-type { border-bottom: none; }
-.mapa-loja-nome { font-family: var(--font-display); font-size: 17px; color: var(--accent-dark); margin-bottom: 8px; }
+.mapa-loja-nome {
+  font-family: var(--font-display); font-size: 17px; color: var(--accent-dark); margin-bottom: 8px;
+  width: fit-content; position: sticky; left: 0; z-index: 1;
+}
 .mapa-loja--crm { margin-top: 4px; }
 .mapa-loja--crm .mapa-loja-nome { color: var(--c-violet-fg); }
-.mapa-vazio { font-size: 12.5px; padding: 4px 0 4px 160px; }
+.mapa-vazio { font-size: 12.5px; padding: 4px 0 4px 160px; position: sticky; left: 0; z-index: 1; width: fit-content; }
 
 .mapa-sub-linha { display: flex; align-items: flex-start; margin-bottom: 6px; }
 .mapa-sub-linha:last-child { margin-bottom: 0; }
 .mapa-sub-nome {
   width: 160px; flex-shrink: 0; font-size: 12.5px; font-weight: 700; color: var(--text-soft);
   padding-top: 4px;
+  position: sticky; left: 0; z-index: 3; background: var(--surface);
 }
-.mapa-sub-pistas { flex: 1; min-width: 480px; }
-.mapa-pista { display: grid; gap: 4px; margin-bottom: 4px; }
+.mapa-sub-pistas { flex-shrink: 0; width: var(--w-flex); }
+.mapa-pista { display: grid; gap: 0; margin-bottom: 4px; }
 .mapa-pista:last-child { margin-bottom: 0; }
 
 .mapa-bar {
   font-size: 11.5px; font-weight: 600; padding: 6px 10px; border-radius: var(--r-sm);
   overflow: hidden; white-space: nowrap; text-overflow: ellipsis; cursor: pointer;
   transition: filter 0.12s;
+  /* sem gap na grade fina (dias contíguos ficam encostados), então a
+     borda sutil é o que separa visualmente duas barras vizinhas do
+     mesmo responsável (mesma cor de fundo) */
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
 }
 .mapa-bar:hover { filter: brightness(0.95); }
 .mapa-bar--crm { background: var(--c-violet-bg); color: var(--c-violet-fg); cursor: default; font-weight: 700; text-align: center; }

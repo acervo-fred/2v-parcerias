@@ -45,22 +45,29 @@ function mesesDoIntervalo(tasks) {
   }
   return meses;
 }
-// cada mês é dividido em SUBCOLS_POR_MES colunas (~semanas) pra uma
-// tarefa que termina, por exemplo, na 2ª semana do mês não ocupar
-// visualmente o mês inteiro — só a fração correspondente. O cabeçalho,
-// as guias verticais e as pistas de barra usam todos a mesma grade fina
-// (meses.length * SUBCOLS_POR_MES colunas), garantindo alinhamento
-// pixel-a-pixel entre eles; só a linha de guia de fim de mês (a cada 4
-// colunas) fica visível, as subdivisões internas da semana não desenham
-// borda pra não poluir visualmente.
-const SUBCOLS_POR_MES = 4;
+// cada mês é dividido em SUBCOLS_POR_MES colunas (~dias) pra uma tarefa
+// que termina, por exemplo, no dia 5 do mês não ocupar visualmente o mês
+// inteiro — só a fração correspondente. O cabeçalho, as guias verticais
+// e as pistas de barra usam todos a mesma grade fina (meses.length *
+// SUBCOLS_POR_MES colunas), garantindo alinhamento pixel-a-pixel entre
+// eles; só a linha de guia de fim de mês fica visível, as subdivisões
+// internas do mês não desenham borda pra não poluir visualmente.
+// A largura do painel de meses não é fixa em px — ela é relativa à
+// janela (ver var(--n-meses)/calc() no CSS): com até MESES_VISIVEIS
+// meses, eles esticam pra ocupar o espaço disponível (como antes);
+// acima disso, cada mês trava na largura que teria com exatamente
+// MESES_VISIVEIS meses preenchendo a tela, e o excesso rola pro lado —
+// a coluna de loja/responsável fica fixa via position:sticky.
+const SUBCOLS_POR_MES = 20;
+const MESES_VISIVEIS = 3;
 
 // linhas verticais finas dividindo as colunas de mês — UMA linha contínua
 // cobrindo a altura inteira do mapa (não por linha/pista), com z-index
 // negativo (ver .mapa-col-guias no CSS) pra ficar sempre atrás de
 // qualquer conteúdo — título de loja, texto de barra etc. — sem nunca
 // tampar palavra nenhuma, já que quem cobre a linha é sempre o que está
-// por cima dela, não o contrário.
+// por cima dela, não o contrário. Largura vem do CSS (var(--n-meses)),
+// não daqui — só a contagem de subcolunas é fixada em JS.
 function colGuiasHtml(numMeses) {
   const n = numMeses * SUBCOLS_POR_MES;
   return `<div class="mapa-col-guias" style="grid-template-columns:repeat(${n},1fr)">${
@@ -69,9 +76,11 @@ function colGuiasHtml(numMeses) {
 }
 
 // linha vermelha marcando o dia de hoje — posição em % contínuo (não
-// travada nas subcolunas de semana usadas pelas barras) pra "andar" um
-// pouco a cada dia que passa, não só a cada mudança de subcoluna. Some
-// da tela quando hoje cai fora do intervalo de meses exibido (mesmo
+// travada nas subcolunas usadas pelas barras) pra "andar" um pouco a
+// cada dia que passa, não só a cada mudança de subcoluna; % (em vez de
+// px) porque a largura do painel de meses agora é elástica (ver CSS),
+// então a mesma fração sempre cai no dia certo, esticado ou não. Some da
+// tela quando hoje cai fora do intervalo de meses exibido (mesmo
 // critério de "não achou o mês" que subColunaDeData usa).
 function hojeLinhaHtml(meses) {
   const hoje = new Date();
@@ -111,7 +120,7 @@ export async function renderEquipe(app) {
       </div>
     </div>
     ${meses.length
-      ? `<div class="mapa-equipe" id="mapa-equipe"></div>`
+      ? `<div class="mapa-equipe" id="mapa-equipe" style="--n-meses:${meses.length};--meses-visiveis:${MESES_VISIVEIS}"></div>`
       : `<div class="empty">Nenhuma demanda cadastrada ainda — clique em "+ Cadastrar ação" pra criar a primeira.</div>`}
   `;
 
