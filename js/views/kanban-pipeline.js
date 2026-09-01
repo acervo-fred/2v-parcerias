@@ -18,6 +18,7 @@
    é a sub-guia "Próximos passos" (ver kanban-proximos-passos.js). */
 
 import { esc, formatDataBR } from "../ui/dom.js";
+import { store } from "../data/store.js";
 import { carregarFunil, garantirPartner, nivelUrgencia } from "../data/funil.js";
 import { abrirFecharParceria } from "./cadastros.js";
 
@@ -55,7 +56,15 @@ function proximaPendente(nextActions) {
 }
 
 export async function renderKanbanPipeline(app) {
-  const { partners, parceiros, partnersById, todosCards } = await carregarFunil();
+  const [{ partners, parceiros, partnersById, todosCards }, lancamentos] = await Promise.all([
+    carregarFunil(),
+    store.listLancamentos(),
+  ]);
+  // parceiros com pelo menos 1 uso já registrado na Base de dados — só
+  // vira o KPI "Usados" no resumo (não é coluna, não sai de "Ativos")
+  const parceirosComUso = new Set(
+    lancamentos.filter((l) => l.parceiroId && l.quantidadeUso > 0).map((l) => l.parceiroId)
+  );
 
   let filtroTipo = "Todos";
   let filtroDias = "0";
@@ -92,7 +101,7 @@ export async function renderKanbanPipeline(app) {
   // reconta em cima de todosCards (a mesma lista que o drag muda),
   // pra não depender de partners/parceiros ficarem sincronizados à parte.
   function desenharProgresso() {
-    progressoWrap.innerHTML = funilProgressoHtml(todosCards);
+    progressoWrap.innerHTML = funilProgressoHtml(todosCards, parceirosComUso);
   }
   desenharProgresso();
 
@@ -230,13 +239,17 @@ const ESTAGIOS_FUNIL = [
     icone: `<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>`,
   },
 ];
-function funilProgressoHtml(todosCards) {
+// parceirosComUso: Set de ids com pelo menos 1 uso na Base de dados —
+// vira só uma marca de KPI grudada no nó "Ativos" (não some do total
+// de Ativos, não é um nó próprio do funil)
+function funilProgressoHtml(todosCards, parceirosComUso) {
   const numeros = {
     lead: todosCards.filter((p) => p.stage === "lead").length,
     negociacao: todosCards.filter((p) => p.stage === "negociacao").length,
     ativo: todosCards.filter((p) => p.stage === "ativo").length,
     perdido: todosCards.filter((p) => p.stage === "perdido").length,
   };
+  const usados = todosCards.filter((p) => p.stage === "ativo" && parceirosComUso.has(p.id)).length;
   return `<div class="funil-progresso">
     ${ESTAGIOS_FUNIL.map((e, i) => `
       ${i > 0 ? `<div class="fp-seta">→</div>` : ""}
@@ -244,6 +257,7 @@ function funilProgressoHtml(todosCards) {
         <div class="fp-icone fp-icone--${e.cor}"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${e.icone}</svg></div>
         <div class="fp-label fp-label--${e.cor}">${esc(e.label.toUpperCase())}</div>
         <div class="fp-numero fp-numero--${e.cor}">${numeros[e.valor]}</div>
+        ${e.valor === "ativo" ? `<div class="fp-kpi fp-kpi--blue" title="Parceiros ativos com pelo menos 1 uso já registrado na Base de dados">${usados} usados</div>` : ""}
       </div>
     `).join("")}
   </div>`;

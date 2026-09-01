@@ -7,13 +7,14 @@ import { store } from "../data/store.js";
 import { esc, formatMoeda, formatDataBR } from "../ui/dom.js";
 import { abrirLancamentoLote, abrirNovoLancamento, abrirFaturamentoLoja } from "./cadastros.js";
 import { dedupLancamentos, statusDiasDoMes, MES_NOMES } from "../util/periodo.js";
-import { agruparParceirosPorCupom, chaveCupom } from "../util/cupom.js";
+import { agruparParceirosPorCupom, chaveCupom, cupomEm50 } from "../util/cupom.js";
 import { openModal } from "../ui/modal.js";
 
 export async function renderLancamentos(app) {
-  const [lancamentos, parceiros] = await Promise.all([
+  const [lancamentos, parceiros, grupos] = await Promise.all([
     store.listLancamentos(),
     store.listParceiros(),
+    store.listGrupos(),
   ]);
   const porId = Object.fromEntries(parceiros.map((p) => [p.id, p]));
   // cupom compartilhado por mais de uma empresa conta como um só no filtro
@@ -114,7 +115,7 @@ export async function renderLancamentos(app) {
     });
 
     lista.innerHTML = arr.length
-      ? arr.map((l) => linhaTabela(l, porId[l.parceiroId])).join("")
+      ? arr.map((l) => linhaTabela(l, porId[l.parceiroId], grupos)).join("")
       : `<tr><td colspan="5" class="empty">Nenhum lançamento encontrado.</td></tr>`;
 
     app.querySelectorAll("#tabela-lancamentos th[data-sort]").forEach((th) => {
@@ -224,18 +225,20 @@ function stat(num, label) {
   </div>`;
 }
 
-function linhaTabela(l, parceiro) {
+function linhaTabela(l, parceiro, grupos) {
   const periodo = l.dataInicio === l.dataFim || !l.dataFim
     ? formatDataBR(l.dataInicio)
     : `${formatDataBR(l.dataInicio)} – ${formatDataBR(l.dataFim)}`;
-  const nomeParceiro = !l.parceiroId
-    ? "Faturamento da loja"
-    : parceiro ? `${parceiro.cupom} — ${parceiro.nome}` : "(parceiro removido)";
+  const nomeParceiroHtml = !l.parceiroId
+    ? esc("Faturamento da loja")
+    : parceiro
+      ? `<strong${cupomEm50(parceiro, grupos) ? ' class="cupom-codigo--50"' : ""}>${esc(parceiro.cupom)}</strong> — ${esc(parceiro.nome)}`
+      : esc("(parceiro removido)");
   const valores = !l.parceiroId
     ? `${formatMoeda(l.faturamentoTotal)} total${l.faturamentoDelivery ? ` · ${formatMoeda(l.faturamentoDelivery)} delivery` : ""}`
     : `${formatMoeda(l.faturamentoCupom)} via cupom`;
   return `<tr class="rank-row" data-id="${esc(l.id)}">
-    <td>${esc(nomeParceiro)}</td>
+    <td>${nomeParceiroHtml}</td>
     <td>${esc(periodo)}</td>
     <td class="num">${l.parceiroId ? l.quantidadeUso : "—"}</td>
     <td class="num">${esc(valores)}</td>

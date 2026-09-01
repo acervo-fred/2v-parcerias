@@ -33,6 +33,9 @@ const TOP_N_CUPONS = 8;
 // paleta categórica validada (slots 1-5 da ordem fixa: blue, aqua, yellow, green, violet)
 const CORES_CATEGORICAS = ["#2a78d6", "#1baf7a", "#eda100", "#008300", "#4a3aa7"];
 const COR_OUTROS = "var(--c-gray-fg)";
+// régua de "Tendências — Perdidos": "sem uso há N+ dias" (contados de
+// hoje) — ver calcularPerdidosPorDias/diasPerdidosManual
+const DIAS_PERDIDOS_OPCOES = [7, 14, 21, 30, 60];
 
 export async function renderDashboard(app) {
   const [lancamentosBrutos, parceiros, lojaAtual, grupos, listas] = await Promise.all([
@@ -56,6 +59,11 @@ export async function renderDashboard(app) {
   let filtroTipo = "Todos";
   // "retidos" | "perdidos" — toggle do card de Tendências à esquerda
   let modoRetidos = "retidos";
+  // null = acompanha automaticamente a duração do período do topo
+  // (snapada pra opção mais próxima); número = valor escolhido à mão
+  // na régua de "Tendências — Perdidos", passa a valer até a página
+  // recarregar (trocar De/Até no topo não reseta a escolha manual)
+  let diasPerdidosManual = null;
 
   const [deInicial, ateInicial] = presetRange("mes");
 
@@ -140,6 +148,11 @@ export async function renderDashboard(app) {
             </div>
           </div>
           <div class="muted" style="font-size:11.5px;margin-bottom:12px" id="tendencias-retidos-desc"></div>
+          <div class="dias-slider-wrap" id="perdidos-dias-wrap" style="display:none">
+            <div class="dias-slider-label">Sem uso há <strong id="perdidos-dias-valor"></strong></div>
+            <input type="range" class="dias-slider" id="perdidos-dias-slider" min="0" max="${DIAS_PERDIDOS_OPCOES.length - 1}" step="1" value="0" />
+            <div class="dias-slider-ticks">${DIAS_PERDIDOS_OPCOES.map((d) => `<span>${d}</span>`).join("")}</div>
+          </div>
           <div id="tendencias-retidos"></div>
         </div>
         <div class="chart-card">
@@ -201,6 +214,13 @@ export async function renderDashboard(app) {
     const comparavel = Boolean(de && ate);
     const [deAnt, ateAnt] = comparavel ? periodoAnterior(de, ate) : ["", ""];
 
+    // régua de "Tendências — Perdidos": "sem uso há N+ dias", contados de
+    // hoje — não depende do período De/Até do topo (ver
+    // calcularPerdidosPorDias); default = primeira opção até o usuário
+    // arrastar a régua
+    const diasPerdidos = diasPerdidosManual ?? DIAS_PERDIDOS_OPCOES[0];
+    atualizarSliderPerdidos(diasPerdidos);
+
     const lancamentosTipo = filtroTipo === "Todos" ? lancamentos : lancamentos.filter((l) => porId[l.parceiroId]?.tipo === filtroTipo);
     const primeiraDataCupom = primeiraDataPorCupom(lancamentosTipo, chavePorParceiroId);
 
@@ -217,7 +237,7 @@ export async function renderDashboard(app) {
     desenharRanking(app, doPeriodo, chavePorParceiroId, porChave, grupos);
     desenharRankingUsos(app, doPeriodo, chavePorParceiroId, porChave, grupos);
     desenharParticipacao(app, doPeriodo, chavePorParceiroId, porChave);
-    desenharTendencias(app, doPeriodo, doPeriodoAnterior, comparavel, chavePorParceiroId, porChave, primeiraDataCupom, deAnt, ateAnt, modoRetidos, grupos, porId, porIdGrupo);
+    desenharTendencias(app, doPeriodo, doPeriodoAnterior, lancamentosTipo, comparavel, chavePorParceiroId, porChave, primeiraDataCupom, deAnt, ateAnt, modoRetidos, grupos, porId, porIdGrupo, diasPerdidos);
 
     // gráficos "por cupom" (Faturamento com cupons / Uso de Cupons): sempre
     // o histórico completo, independente do período selecionado no topo
@@ -247,7 +267,7 @@ export async function renderDashboard(app) {
     const ordenadas = ordenarLinhas(filtradas, tabelaState.sortKey, tabelaState.sortDir);
     const body = app.querySelector("#tabela-ranking-body");
     body.innerHTML = ordenadas.length
-      ? ordenadas.map(tabelaRowHtml).join("")
+      ? ordenadas.map((l) => tabelaRowHtml(l, grupos)).join("")
       : `<tr><td colspan="7" class="empty">Nenhum resultado nesse período.</td></tr>`;
 
     app.querySelectorAll("#tabela-ranking th[data-sort]").forEach((th) => {
@@ -256,11 +276,25 @@ export async function renderDashboard(app) {
     });
   }
 
+  // sincroniza a posição/rótulo da régua com o valor efetivo (manual ou
+  // automático) — chamado a cada atualizarPeriodo(), não só ao arrastar
+  function atualizarSliderPerdidos(dias) {
+    const idx = DIAS_PERDIDOS_OPCOES.indexOf(dias);
+    const slider = app.querySelector("#perdidos-dias-slider");
+    if (slider && idx >= 0) slider.value = String(idx);
+    const valorEl = app.querySelector("#perdidos-dias-valor");
+    if (valorEl) valorEl.textContent = `${dias}+ dias`;
+  }
+
   app.querySelector("#toggle-retidos-perdidos").addEventListener("click", (e) => {
     const btn = e.target.closest("[data-modo]");
     if (!btn) return;
     modoRetidos = btn.dataset.modo;
     app.querySelectorAll("#toggle-retidos-perdidos .chip").forEach((c) => c.classList.toggle("active", c === btn));
+    atualizarPeriodo();
+  });
+  app.querySelector("#perdidos-dias-slider").addEventListener("input", (e) => {
+    diasPerdidosManual = DIAS_PERDIDOS_OPCOES[Number(e.target.value)];
     atualizarPeriodo();
   });
 
@@ -711,21 +745,22 @@ function wireBarDrillDown(container) {
   });
 }
 
-/* ---------- render: Tendências — retidos/perdidos (uso nos dois
-   períodos) vs novos que merecem atenção (uso só no período atual).
-   Compara sempre o período selecionado com o imediatamente anterior de
-   mesma duração (periodoAnterior, já usado pros deltas dos KPIs).
+/* ---------- render: Tendências — retidos (uso nos dois períodos) vs
+   novos que merecem atenção (uso só no período atual). Compara sempre o
+   período selecionado com o imediatamente anterior de mesma duração
+   (periodoAnterior, já usado pros deltas dos KPIs).
 
-   "Retidos" e "Perdidos" partem do mesmo cohort — cupons que já
-   apareceram como "Novos" no período anterior (primeiro uso deles caiu
-   dentro de [deAnt, ateAnt], via primeiraDataCupom) — e respondem "desse
-   cohort, quem continuou usando (retidos) e quem parou (perdidos)?".
-   "Perdidos" mostra o faturamento que o cupom tinha no período anterior
-   (não no atual, onde por definição ele não teve uso). Cada linha de
-   "Retidos"/"Perdidos"/"Novos" ganha marcadores sobrescritos ¹/² conforme
-   o cupom teve algum uso dentro do período de 50% do grupo (cupomEhEspecial,
-   mesmo critério do resto do Dashboard) no período selecionado (¹) e/ou
-   no período anterior (²). */
+   "Retidos" parte do cohort de cupons que já apareceram como "Novos" no
+   período anterior (primeiro uso deles caiu dentro de [deAnt, ateAnt],
+   via primeiraDataCupom) e responde "desse cohort, quem continuou
+   usando?". Cada linha de "Retidos"/"Novos" ganha marcadores
+   sobrescritos ¹/² conforme o cupom teve algum uso dentro do período de
+   50% do grupo (cupomEhEspecial, mesmo critério do resto do Dashboard)
+   no período selecionado (¹) e/ou no período anterior (²).
+
+   "Perdidos" é outra conta, independente desta (ver
+   calcularPerdidosPorDias) — não compara período atual vs. anterior, e
+   sim "há quantos dias, contados de hoje, cada cupom não é usado". */
 function calcularTendencias(doPeriodo, doPeriodoAnterior, chavePorParceiroId, porChave, primeiraDataCupom, deAnt, ateAnt, porId, porIdGrupo) {
   const atualChaves = new Set();
   const fatAtualPorChave = new Map();
@@ -738,13 +773,11 @@ function calcularTendencias(doPeriodo, doPeriodoAnterior, chavePorParceiroId, po
     if (cupomEhEspecial(l, porId[l.parceiroId], porIdGrupo)) especialAtualPorChave.add(chave);
   }
   const anteriorChaves = new Set();
-  const fatAnteriorPorChave = new Map();
   const especialAnteriorPorChave = new Set();
   for (const l of doPeriodoAnterior) {
     const chave = chavePorParceiroId[l.parceiroId];
     if (!chave) continue;
     if (l.quantidadeUso > 0) anteriorChaves.add(chave);
-    fatAnteriorPorChave.set(chave, (fatAnteriorPorChave.get(chave) || 0) + l.faturamentoCupom);
     if (cupomEhEspecial(l, porId[l.parceiroId], porIdGrupo)) especialAnteriorPorChave.add(chave);
   }
   const eraNovoNoAnterior = (chave) => {
@@ -758,12 +791,43 @@ function calcularTendencias(doPeriodo, doPeriodoAnterior, chavePorParceiroId, po
   const retidos = [...anteriorChaves]
     .filter((c) => eraNovoNoAnterior(c) && atualChaves.has(c))
     .map((c) => linha(c, fatAtualPorChave)).filter((l) => l.linha).sort((a, b) => b.fat - a.fat);
-  const perdidos = [...anteriorChaves]
-    .filter((c) => !atualChaves.has(c))
-    .map((c) => linha(c, fatAnteriorPorChave)).filter((l) => l.linha).sort((a, b) => b.fat - a.fat);
   const novos = [...atualChaves].filter((c) => !anteriorChaves.has(c))
     .map((c) => linha(c, fatAtualPorChave)).filter((l) => l.linha).sort((a, b) => b.fat - a.fat);
-  return { retidos, perdidos, novos };
+  return { retidos, novos };
+}
+
+// última data (dataFim) em que cada cupom teve algum uso registrado,
+// olhando TODA a história (sem filtro de período) — usado só por
+// "Tendências — Perdidos"
+function ultimaDataUsoPorCupom(lancamentos, chavePorParceiroId) {
+  const mapa = new Map();
+  for (const l of lancamentos) {
+    if (!l.parceiroId || !(l.quantidadeUso > 0)) continue;
+    const chave = chavePorParceiroId[l.parceiroId];
+    if (!chave) continue;
+    const fim = l.dataFim || l.dataInicio;
+    if (!fim) continue;
+    const atual = mapa.get(chave);
+    if (!atual || fim > atual) mapa.set(chave, fim);
+  }
+  return mapa;
+}
+// cupons já usados alguma vez, mas sem nenhum uso nos últimos `diasMin`
+// dias contados de hoje — independente do período selecionado no topo
+// do dashboard. Cupom nunca usado não entra aqui (não é "perdido", é
+// "nunca ativado" — outra categoria).
+function calcularPerdidosPorDias(lancamentos, chavePorParceiroId, porChave, diasMin) {
+  const ultimaData = ultimaDataUsoPorCupom(lancamentos, chavePorParceiroId);
+  const hojeISO = new Date().toISOString().slice(0, 10);
+  const linhas = [];
+  for (const [chave, ultima] of ultimaData.entries()) {
+    const linha = porChave[chave];
+    if (!linha) continue;
+    const dias = Math.round((new Date(`${hojeISO}T00:00:00`) - new Date(`${ultima}T00:00:00`)) / 86400000);
+    if (dias < diasMin) continue;
+    linhas.push({ linha, dias, ultimaData: ultima });
+  }
+  return linhas.sort((a, b) => a.dias - b.dias);
 }
 function marcadores50Html(l) {
   let out = "";
@@ -782,29 +846,53 @@ function listaTendenciaHtml(linhas, vazioTexto, grupos, mostrarMarcadores) {
     </div>
   `).join("");
 }
-function desenharTendencias(app, doPeriodo, doPeriodoAnterior, comparavel, chavePorParceiroId, porChave, primeiraDataCupom, deAnt, ateAnt, modoRetidos, grupos, porId, porIdGrupo) {
+// mesmo componente visual (.viz-bar-row) da lista de Retidos/Novos, só
+// que a barra representa dias sem uso em vez de faturamento
+function listaPerdidosHtml(linhas, vazioTexto) {
+  if (!linhas.length) return `<div class="empty">${esc(vazioTexto)}</div>`;
+  const max = Math.max(...linhas.map((l) => l.dias), 1);
+  return linhas.map((l) => `
+    <div class="viz-bar-row" data-id="${esc(l.linha.parceiros[0].id)}" tabindex="0" role="img" aria-label="${esc(l.linha.cupom)}: sem uso há ${l.dias} dias">
+      <div class="viz-bar-label" title="${esc(l.linha.cupom)} — ${esc(l.linha.parceiros.map((p) => p.nome).join(", "))}">${esc(l.linha.cupom)}</div>
+      <div class="viz-bar-track"><div class="viz-bar-fill" style="width:${Math.max(2, Math.round((l.dias / max) * 100))}%"></div></div>
+      <div class="viz-bar-val">${l.dias} dia${l.dias === 1 ? "" : "s"}</div>
+    </div>
+  `).join("");
+}
+function desenharTendencias(app, doPeriodo, doPeriodoAnterior, lancamentosTipo, comparavel, chavePorParceiroId, porChave, primeiraDataCupom, deAnt, ateAnt, modoRetidos, grupos, porId, porIdGrupo, diasPerdidos) {
   const elRetidos = app.querySelector("#tendencias-retidos");
   const elNovos = app.querySelector("#tendencias-novos");
   const tituloEl = app.querySelector("#tendencias-retidos-titulo");
   const descEl = app.querySelector("#tendencias-retidos-desc");
-  if (!comparavel) {
-    const aviso = `<div class="empty">Selecione um período (De/Até) pra ver tendências.</div>`;
-    elRetidos.innerHTML = aviso;
-    elNovos.innerHTML = aviso;
-    return;
-  }
-  const { retidos, perdidos, novos } = calcularTendencias(doPeriodo, doPeriodoAnterior, chavePorParceiroId, porChave, primeiraDataCupom, deAnt, ateAnt, porId, porIdGrupo);
+  const sliderWrap = app.querySelector("#perdidos-dias-wrap");
+  sliderWrap.style.display = modoRetidos === "perdidos" ? "" : "none";
+
+  // "Perdidos" não depende do período De/Até do topo — é sempre "há
+  // quantos dias, contados de hoje, cada cupom já usado alguma vez está
+  // sem uso" (ver calcularPerdidosPorDias)
   if (modoRetidos === "perdidos") {
     tituloEl.textContent = "Tendências — Perdidos";
-    descEl.innerHTML = "Cupons usados no período anterior e não usados neste;<br>1: Cupons com 50% no período selecionado.<br>2: Cupons com 50% no período anterior.";
-    elRetidos.innerHTML = listaTendenciaHtml(perdidos, "Nenhum cupom perdido nesse período.", grupos, true);
+    descEl.textContent = `Cupons já usados alguma vez, sem nenhum uso nos últimos ${diasPerdidos}+ dias (contados de hoje).`;
+    const perdidos = calcularPerdidosPorDias(lancamentosTipo, chavePorParceiroId, porChave, diasPerdidos);
+    elRetidos.innerHTML = listaPerdidosHtml(perdidos, `Nenhum cupom sem uso há ${diasPerdidos}+ dias.`);
+    wireBarDrillDown(elRetidos);
+  } else if (!comparavel) {
+    elRetidos.innerHTML = `<div class="empty">Selecione um período (De/Até) pra ver tendências.</div>`;
   } else {
+    const { retidos } = calcularTendencias(doPeriodo, doPeriodoAnterior, chavePorParceiroId, porChave, primeiraDataCupom, deAnt, ateAnt, porId, porIdGrupo);
     tituloEl.textContent = "Tendências — Retidos";
     descEl.innerHTML = "Cupons novos no período anterior que continuaram sendo usados neste;<br>1: Cupons com 50% no período selecionado.<br>2: Cupons com 50% no período anterior.";
     elRetidos.innerHTML = listaTendenciaHtml(retidos, "Nenhum cupom retido nesse período.", grupos, true);
+    wireBarDrillDown(elRetidos);
   }
-  elNovos.innerHTML = listaTendenciaHtml(novos, "Nenhum cupom novo nesse período.", grupos, true);
-  wireBarDrillDown(elRetidos);
+
+  // "Novos" sempre depende do período comparável, independente do modo
+  if (!comparavel) {
+    elNovos.innerHTML = `<div class="empty">Selecione um período (De/Até) pra ver tendências.</div>`;
+  } else {
+    const { novos } = calcularTendencias(doPeriodo, doPeriodoAnterior, chavePorParceiroId, porChave, primeiraDataCupom, deAnt, ateAnt, porId, porIdGrupo);
+    elNovos.innerHTML = listaTendenciaHtml(novos, "Nenhum cupom novo nesse período.", grupos, true);
+  }
   wireBarDrillDown(elNovos);
 }
 
@@ -886,9 +974,9 @@ function ordenarLinhas(linhas, key, dir) {
     return (va - vb) * mul;
   });
 }
-function tabelaRowHtml(l) {
+function tabelaRowHtml(l, grupos) {
   return `<tr class="rank-row" data-id="${esc(l.linha.parceiros[0].id)}" tabindex="0">
-    <td>${esc(l.linha.cupom)}</td>
+    <td${labelClass50(l.linha, grupos) ? ' class="cupom-codigo--50"' : ""}>${esc(l.linha.cupom)}</td>
     <td>${esc(l.nomes)}</td>
     <td class="num">${l.uso}</td>
     <td class="num">${esc(formatMoeda(l.fat))}</td>
