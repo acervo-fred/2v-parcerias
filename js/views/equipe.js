@@ -68,6 +68,21 @@ function colGuiasHtml(numMeses) {
   }</div>`;
 }
 
+// linha vermelha marcando o dia de hoje — posição em % contínuo (não
+// travada nas subcolunas de semana usadas pelas barras) pra "andar" um
+// pouco a cada dia que passa, não só a cada mudança de subcoluna. Some
+// da tela quando hoje cai fora do intervalo de meses exibido (mesmo
+// critério de "não achou o mês" que subColunaDeData usa).
+function hojeLinhaHtml(meses) {
+  const hoje = new Date();
+  const ano = hoje.getFullYear(), mes = hoje.getMonth() + 1, dia = hoje.getDate();
+  const idxMes = meses.findIndex((m) => m.ano === ano && m.mes === mes);
+  if (idxMes === -1) return "";
+  const diasNoMes = new Date(ano, mes, 0).getDate();
+  const pct = ((idxMes + (dia - 1) / diasNoMes) / meses.length) * 100;
+  return `<div class="mapa-linha-hoje"><div class="mapa-linha-hoje-marca" style="left:${pct.toFixed(3)}%" title="Hoje"></div></div>`;
+}
+
 // coluna absoluta (0-based) na grade fina de meses.length*SUBCOLS_POR_MES,
 // combinando o mês da data com a fração do mês em que o dia cai (dia 1
 // do mês → subcoluna 0, fim do mês → última subcoluna).
@@ -114,6 +129,7 @@ export async function renderEquipe(app) {
   const mapa = app.querySelector("#mapa-equipe");
   mapa.innerHTML = `
     ${colGuiasHtml(meses.length)}
+    ${hojeLinhaHtml(meses)}
     <div class="mapa-cabecalho">
       <div class="mapa-cabecalho-label"></div>
       <div class="mapa-cabecalho-meses" style="grid-template-columns:repeat(${meses.length * SUBCOLS_POR_MES},1fr)">
@@ -186,7 +202,7 @@ function subLinhaHtml(responsavel, itens, meses) {
         ${finalPorPista.map((_, pistaIdx) => `
           <div class="mapa-pista" style="grid-template-columns:repeat(${totalCols},1fr)">
             ${comPista.filter((t) => t.pista === pistaIdx).map((t) => `
-              <div class="mapa-bar pp-bar--${corDe(responsavel)}" style="grid-column:${t.idxIni + 1}/${t.idxFim + 2}" data-task-id="${esc(t.id)}" data-responsavel="${esc(responsavel)}" title="${esc(t.description)}">${esc(t.description)}</div>
+              <div class="mapa-bar pp-bar--${corDe(responsavel)}${t.concluidaEm ? " acao-concluida" : ""}" style="grid-column:${t.idxIni + 1}/${t.idxFim + 2}" data-task-id="${esc(t.id)}" data-responsavel="${esc(responsavel)}" title="${esc(t.description)}${t.concluidaEm ? " (feita)" : ""}">${esc(t.description)}</div>
             `).join("")}
           </div>
         `).join("")}
@@ -273,6 +289,9 @@ async function abrirEditarTarefa(task, lojaNome, responsavelContexto) {
         ${fieldText("dueDate", "Prazo", { type: "date", required: true, value: task.dueDate || "" })}
       </div>
       ${fieldResponsavel(responsaveisDe(task))}
+      <label class="checkbox-inline" style="margin-top:4px">
+        <input type="checkbox" name="concluida" ${task.concluidaEm ? "checked" : ""}> Marcar como feita
+      </label>
     `,
     onMount: wireResponsavelField,
     onDelete: async () => {
@@ -292,9 +311,11 @@ async function abrirEditarTarefa(task, lojaNome, responsavelContexto) {
       const dueDate = readValue(form, "dueDate");
       const dataInicio = readValue(form, "dataInicio") || "";
       const responsaveis = readResponsaveis(form);
+      const feita = form.elements["concluida"].checked;
+      const concluidaEm = feita ? (task.concluidaEm || new Date().toISOString().slice(0, 10)) : null;
       if (!description) throw new Error("Descreva a demanda.");
       if (!dueDate) throw new Error("Informe o prazo.");
-      await store.updateTaskGeral(task.id, { description, dueDate, dataInicio, responsaveis });
+      await store.updateTaskGeral(task.id, { description, dueDate, dataInicio, responsaveis, concluidaEm });
       avisarMudanca();
     },
   });

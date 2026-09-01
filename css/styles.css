@@ -420,6 +420,14 @@ button { font: inherit; }
 .mapa-col-guia--mes { border-right: 1px solid var(--border); }
 .mapa-col-guia--mes:last-child { border-right: none; }
 
+/* linha vermelha do dia de hoje — mesma caixa de coordenadas dos guias
+   de mês acima (left:160px…right:0), mas com a marca em si (a linha)
+   num filho posicionado por % contínuo (ver hojeLinhaHtml em
+   js/views/equipe.js), não travado nas subcolunas de semana. z-index
+   acima do conteúdo pra sempre aparecer, mesmo sobre uma barra. */
+.mapa-linha-hoje { position: absolute; top: 0; bottom: 0; left: 160px; right: 0; pointer-events: none; z-index: 2; }
+.mapa-linha-hoje-marca { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--c-red-fg); }
+
 .mapa-loja { padding: 14px 0; border-bottom: 1px solid var(--border); }
 .mapa-loja:last-of-type { border-bottom: none; }
 .mapa-loja-nome { font-family: var(--font-display); font-size: 17px; color: var(--accent-dark); margin-bottom: 8px; }
