@@ -16,7 +16,7 @@ import { store } from "../data/store.js";
 import { esc } from "../ui/dom.js";
 import { badge } from "../ui/badges.js";
 import { abrirNovoProspecto, abrirFecharParceria } from "./cadastros.js";
-import { geocodeEndereco, distanciaMetros, formatarDistancia } from "../util/geocoding.js";
+import { geocodeEndereco, geocodeEnderecoEstruturado, distanciaMetros, formatarDistancia } from "../util/geocoding.js";
 
 export async function renderProspeccao(app) {
   const [negocios, partners, loja] = await Promise.all([
@@ -130,7 +130,13 @@ function inicializarMapa(loja, negocios, desenhar) {
   (async () => {
     const pendentes = negocios.filter((p) => (p.local || "").trim() && p.localGeocodado !== p.local);
     for (const p of pendentes) {
-      const coord = await geocodeEndereco(p.local, { lat: loja.lat, lng: loja.lng });
+      const bias = { lat: loja.lat, lng: loja.lng };
+      // cadastros novos/editados vêm com rua/número/CEP separados (mais
+      // confiável — ver js/ui/endereco-fields.js); cadastros antigos, só
+      // com o texto livre de "local", caem no geocodeEndereco de sempre.
+      const coord = (p.enderecoRua || "").trim()
+        ? await geocodeEnderecoEstruturado({ rua: p.enderecoRua, numero: p.enderecoNumero, cep: p.enderecoCep, bairro: p.enderecoBairro }, bias)
+        : await geocodeEndereco(p.local, bias);
       p.lat = coord?.lat ?? null;
       p.lng = coord?.lng ?? null;
       p.localGeocodado = p.local;

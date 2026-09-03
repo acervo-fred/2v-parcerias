@@ -4,6 +4,7 @@
 import { store } from "../data/store.js";
 import { esc, parseNumeroBR, formatNumeroBR } from "../ui/dom.js";
 import { openModal, fieldText, fieldTextarea, fieldSelect, readValue } from "../ui/modal.js";
+import { htmlCamposEndereco, wireCamposEndereco, lerEnderecoComposto } from "../ui/endereco-fields.js";
 import { PERIODO_TIPOS, PERIODO_MAP, rotuloTipoAtual, calcularDataFim, calcularRotulo, calcularEntradaLancamento } from "../util/periodo.js";
 import { agruparParceirosPorCupom } from "../util/cupom.js";
 import { garantirPartner } from "../data/funil.js";
@@ -53,6 +54,7 @@ export async function abrirNovoProspecto(existente = null) {
   const listas = await store.getListas();
   const ed = !!existente;
   const p = existente || {};
+  const bairroRef = { atual: p.enderecoBairro || "" };
   openModal({
     title: ed ? "Editar prospecção" : "Nova prospecção",
     submitLabel: ed ? "Salvar alterações" : "Adicionar",
@@ -62,21 +64,23 @@ export async function abrirNovoProspecto(existente = null) {
         ${fieldText("tipoDetalhe", "Especificar (opcional)", { value: p.tipoDetalhe || "", placeholder: "Ex.: Pilates" })}
       </div>
       ${fieldText("nome", "Nome do negócio", { required: true, value: p.nome || "", placeholder: "Ex.: Salus Flamengo" })}
-      ${fieldText("local", "Local / endereço", { value: p.local || "", placeholder: "Ex.: Praia do Flamengo, 154" })}
+      ${htmlCamposEndereco({ rua: p.enderecoRua || "", numero: p.enderecoNumero || "", cep: p.enderecoCep || "" })}
       <div class="field-2col">
         ${fieldText("responsavel", "Responsável", { value: p.responsavel || "", placeholder: "Nome de contato" })}
         ${fieldText("contato", "Contato", { value: p.contato || "", placeholder: "Telefone ou e-mail" })}
       </div>
       ${fieldTextarea("observacoes", "Observações", { value: p.observacoes || "", placeholder: "Contexto, indicação, próximos passos…" })}
     `,
+    onMount: (form) => wireCamposEndereco(form, bairroRef),
     onSubmit: async (form) => {
       const nome = readValue(form, "nome");
       if (!nome) throw new Error("Informe o nome do negócio.");
+      const { rua, numero, cep, bairro, local } = lerEnderecoComposto(form, bairroRef);
       const campos = {
         tipo: readValue(form, "tipo"),
         tipoDetalhe: readValue(form, "tipoDetalhe"),
         nome,
-        local: readValue(form, "local"),
+        local, enderecoRua: rua, enderecoNumero: numero, enderecoCep: cep, enderecoBairro: bairro,
         responsavel: readValue(form, "responsavel"),
         contato: readValue(form, "contato"),
         observacoes: readValue(form, "observacoes"),
@@ -150,6 +154,7 @@ export async function abrirFecharParceria(parceiro) {
 /* ---------------- Novo parceiro (direto, sem passar por prospecção) ---------------- */
 export async function abrirNovoParceiro() {
   const listas = await store.getListas();
+  const bairroRef = { atual: "" };
   openModal({
     title: "Novo parceiro",
     submitLabel: "Adicionar",
@@ -160,7 +165,7 @@ export async function abrirNovoParceiro() {
         ${fieldText("tipoDetalhe", "Especificar (opcional)", { value: "", placeholder: "Ex.: Pilates" })}
       </div>
       ${fieldText("nome", "Nome do negócio", { required: true, value: "", placeholder: "Ex.: Salus Flamengo" })}
-      ${fieldText("local", "Local / endereço", { value: "", placeholder: "Ex.: Praia do Flamengo, 154" })}
+      ${htmlCamposEndereco()}
       <div class="field-2col">
         ${fieldText("responsavel", "Responsável", { value: "", placeholder: "Nome de contato" })}
         ${fieldText("contato", "Contato", { value: "", placeholder: "Telefone ou e-mail" })}
@@ -176,16 +181,18 @@ export async function abrirNovoParceiro() {
       </div>
       ${fieldTextarea("observacoes", "Observações", { value: "" })}
     `,
+    onMount: (form) => wireCamposEndereco(form, bairroRef),
     onSubmit: async (form) => {
       const nome = readValue(form, "nome");
       const cupom = readValue(form, "cupom");
       if (!nome) throw new Error("Informe o nome do negócio.");
       if (!cupom) throw new Error("Informe o código do cupom.");
+      const { rua, numero, cep, bairro, local } = lerEnderecoComposto(form, bairroRef);
       const novo = await store.addParceiro({
         tipo: readValue(form, "tipo"),
         tipoDetalhe: readValue(form, "tipoDetalhe"),
         nome,
-        local: readValue(form, "local"),
+        local, enderecoRua: rua, enderecoNumero: numero, enderecoCep: cep, enderecoBairro: bairro,
         responsavel: readValue(form, "responsavel"),
         contato: readValue(form, "contato"),
         statusProspeccao: "Cadastrado",
@@ -210,6 +217,7 @@ export async function abrirNovoParceiro() {
 export async function abrirEditarParceiro(parceiro) {
   const listas = await store.getListas();
   const p = parceiro;
+  const bairroRef = { atual: p.enderecoBairro || "" };
   openModal({
     title: "Editar parceiro",
     subtitle: p.nome,
@@ -221,7 +229,7 @@ export async function abrirEditarParceiro(parceiro) {
         ${fieldText("tipoDetalhe", "Especificar (opcional)", { value: p.tipoDetalhe || "", placeholder: "Ex.: Pilates" })}
       </div>
       ${fieldText("nome", "Nome do negócio", { required: true, value: p.nome || "" })}
-      ${fieldText("local", "Local / endereço", { value: p.local || "" })}
+      ${htmlCamposEndereco({ rua: p.enderecoRua || "", numero: p.enderecoNumero || "", cep: p.enderecoCep || "" })}
       <div class="field-2col">
         ${fieldText("responsavel", "Responsável", { value: p.responsavel || "" })}
         ${fieldText("contato", "Contato", { value: p.contato || "", placeholder: "Telefone ou e-mail" })}
@@ -237,16 +245,18 @@ export async function abrirEditarParceiro(parceiro) {
       </div>
       ${fieldTextarea("observacoes", "Observações", { value: p.observacoes || "" })}
     `,
+    onMount: (form) => wireCamposEndereco(form, bairroRef),
     onSubmit: async (form) => {
       const nome = readValue(form, "nome");
       const cupom = readValue(form, "cupom");
       if (!nome) throw new Error("Informe o nome do negócio.");
       if (!cupom) throw new Error("Informe o código do cupom.");
+      const { rua, numero, cep, bairro, local } = lerEnderecoComposto(form, bairroRef);
       await store.updateParceiro(p.id, {
         tipo: readValue(form, "tipo"),
         tipoDetalhe: readValue(form, "tipoDetalhe"),
         nome,
-        local: readValue(form, "local"),
+        local, enderecoRua: rua, enderecoNumero: numero, enderecoCep: cep, enderecoBairro: bairro,
         responsavel: readValue(form, "responsavel"),
         contato: readValue(form, "contato"),
         cupom,

@@ -52,16 +52,12 @@ function apenasRuaNumero(texto) {
   return partes.length > 2 ? partes.slice(0, 2).join(", ") : null;
 }
 
-async function buscarNominatim(texto, bias) {
+async function chamarNominatim(q, bias, d, bounded) {
   await aguardarVez();
-  const params = new URLSearchParams({
-    format: "json", limit: "1",
-    q: /rio de janeiro/i.test(texto) ? `${texto}, Brasil` : `${texto}, Rio de Janeiro, Brasil`,
-  });
+  const params = new URLSearchParams({ format: "json", limit: "1", q });
   if (bias?.lat != null && bias?.lng != null) {
-    const d = 0.2; // ~20km de raio de prioridade ao redor da loja
     params.set("viewbox", `${bias.lng - d},${bias.lat + d},${bias.lng + d},${bias.lat - d}`);
-    params.set("bounded", "0"); // prioriza sem excluir resultados fora da caixa
+    params.set("bounded", bounded);
   }
   try {
     const resp = await fetch(`https://nominatim.openstreetmap.org/search?${params}`);
@@ -75,6 +71,68 @@ async function buscarNominatim(texto, bias) {
   } catch {
     return null;
   }
+}
+
+// nomes de rua ambíguos (ex.: "Avenida Nossa Senhora" pode ser "... de
+// Copacabana", "... de Fátima", "... da Penha") fazem o Nominatim casar com
+// a rua errada quando o texto vem incompleto. Se já temos a coordenada da
+// loja, vale tentar primeiro travado numa área pequena (~3km) ao redor
+// dela — parceiro/endereço perto o bastante desambigua sozinho; só cai pra
+// busca ampla (bounded=0, ~20km, sem excluir resultados fora da caixa) se
+// essa tentativa restrita não achar nada.
+async function buscarNominatim(texto, bias) {
+  const q = /rio de janeiro/i.test(texto) ? `${texto}, Brasil` : `${texto}, Rio de Janeiro, Brasil`;
+  if (bias?.lat != null && bias?.lng != null) {
+    const perto = await chamarNominatim(q, bias, 0.03, "1");
+    if (perto) return perto;
+  }
+  return chamarNominatim(q, bias, 0.2, "0");
+}
+
+// CEP → logradouro/bairro oficiais, via ViaCEP (Correios — gratuito, sem
+// chave). O nome da rua digitado à mão costuma vir incompleto ou truncado
+// (ex.: "Avenida Nossa Senhora" em vez de "... de Copacabana" — existem
+// várias "Nossa Senhora de ___" na cidade), e isso faz o Nominatim casar
+// com a rua homônima errada; o CEP não tem essa ambiguidade, então é usado
+// pra confirmar/corrigir o nome oficial antes de geocodificar (ver
+// js/ui/endereco-fields.js, que preenche o campo Rua a partir daqui).
+export async function buscarCep(cepTexto) {
+  const digitos = (cepTexto || "").replace(/\D/g, "");
+  if (digitos.length !== 8) return null;
+  try {
+    const resp = await fetch(`https://viacep.com.br/ws/${digitos}/json/`);
+    if (!resp.ok) return null;
+    const dados = await resp.json();
+    if (dados.erro) return null;
+    return {
+      logradouro: dados.logradouro || "",
+      bairro: dados.bairro || "",
+      localidade: dados.localidade || "",
+      uf: dados.uf || "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+// Geocodifica um endereço já cadastrado em campos separados (rua/número/CEP
+// — ver js/ui/endereco-fields.js), em vez de texto livre. Como a rua já
+// vem confirmada pelo CEP (ou foi digitada num campo só, sem ruído de
+// prédio/sala misturado), não precisa da limpeza de geocodeEndereco —
+// só cai pro CEP sozinho (aproximação pelo centro da faixa de CEP) se rua
+// e número juntos não acharem nada.
+export async function geocodeEnderecoEstruturado({ rua, numero, cep, bairro } = {}, bias = null) {
+  const partes = [rua, numero, bairro].map((v) => (v || "").trim()).filter(Boolean);
+  const tentativas = [];
+  if (partes.length) tentativas.push(partes.join(", "));
+  const cepLimpo = (cep || "").trim();
+  if (cepLimpo) tentativas.push(cepLimpo);
+
+  for (const tentativa of tentativas) {
+    const resultado = await buscarNominatim(tentativa, bias);
+    if (resultado) return resultado;
+  }
+  return null;
 }
 
 // bias: { lat, lng } da loja, pra priorizar resultados próximos quando o

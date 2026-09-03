@@ -8,7 +8,8 @@ import { USE_FIRESTORE } from "../config/firebase-config.js";
 import * as mock from "../data/mock.js";
 import { esc } from "../ui/dom.js";
 import { getLojaAtualId, setLojaAtualId } from "../data/loja-atual.js";
-import { geocodeEndereco } from "../util/geocoding.js";
+import { geocodeEnderecoEstruturado } from "../util/geocoding.js";
+import { htmlCamposEndereco, wireCamposEndereco, lerEnderecoComposto } from "../ui/endereco-fields.js";
 
 const LS_KEY = "2v-parcerias-db-v1";
 
@@ -84,12 +85,10 @@ export async function renderBackup(app) {
         </div>
 
         <div style="margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid var(--border)">
-          <label for="loja-edit-endereco" style="font-size:13px;font-weight:700">Endereço da loja</label>
-          <p class="muted" style="font-size:12.5px;margin:2px 0 6px">Usado pra centralizar o mapa da Prospecção e calcular distância até cada negócio.</p>
-          <div style="display:flex;gap:8px">
-            <input class="input" id="loja-edit-endereco" type="text" style="flex:1" placeholder="Ex.: Praia do Flamengo, 154 - Flamengo" />
-            <button class="btn" id="btn-salvar-endereco">Salvar endereço</button>
-          </div>
+          <label style="font-size:13px;font-weight:700">Endereço da loja</label>
+          <p class="muted" style="font-size:12.5px;margin:2px 0 6px">Usado pra centralizar o mapa da Prospecção e calcular distância até cada negócio. Preencha o CEP pra confirmar o nome oficial da rua automaticamente.</p>
+          ${htmlCamposEndereco()}
+          <button class="btn" id="btn-salvar-endereco">Salvar endereço</button>
           <div id="endereco-status" class="muted" style="font-size:13px;margin-top:6px"></div>
         </div>
 
@@ -196,22 +195,30 @@ export async function renderBackup(app) {
   });
 
   // ---- endereço (usado pelo mapa da Prospecção) ----
-  const enderecoInput = app.querySelector("#loja-edit-endereco");
   const salvarEnderecoBtn = app.querySelector("#btn-salvar-endereco");
   const enderecoStatus = app.querySelector("#endereco-status");
+  const bairroRef = { atual: "" };
+  wireCamposEndereco(app, bairroRef);
   function preencherEnderecoAtual() {
-    enderecoInput.value = lojaSelecionada()?.endereco || "";
+    const l = lojaSelecionada();
+    app.querySelector('[name="enderecoRua"]').value = l?.enderecoRua || "";
+    app.querySelector('[name="enderecoNumero"]').value = l?.enderecoNumero || "";
+    app.querySelector('[name="enderecoCep"]').value = l?.enderecoCep || "";
+    bairroRef.atual = l?.enderecoBairro || "";
     enderecoStatus.textContent = "";
   }
   preencherEnderecoAtual();
   salvarEnderecoBtn.addEventListener("click", async () => {
     const id = lojaSelect.value;
-    const novoEndereco = enderecoInput.value.trim();
-    if (!novoEndereco) { enderecoStatus.textContent = "✗ Informe um endereço."; return; }
+    const { rua, numero, cep, bairro, local } = lerEnderecoComposto(app, bairroRef);
+    if (!rua) { enderecoStatus.textContent = "✗ Informe ao menos a rua."; return; }
     enderecoStatus.textContent = "Localizando endereço…";
     try {
-      const coord = await geocodeEndereco(novoEndereco);
-      await store.updateLoja(id, { endereco: novoEndereco, lat: coord?.lat ?? null, lng: coord?.lng ?? null });
+      const coord = await geocodeEnderecoEstruturado({ rua, numero, cep, bairro });
+      await store.updateLoja(id, {
+        endereco: local, enderecoRua: rua, enderecoNumero: numero, enderecoCep: cep, enderecoBairro: bairro,
+        lat: coord?.lat ?? null, lng: coord?.lng ?? null,
+      });
       enderecoStatus.textContent = coord
         ? "✓ Endereço salvo e localizado no mapa. Recarregando…"
         : "✓ Endereço salvo, mas não consegui localizar no mapa — o mapa da Prospecção fica desativado até achar um endereço mais específico. Recarregando…";

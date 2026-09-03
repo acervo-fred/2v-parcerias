@@ -177,6 +177,8 @@ export const firestoreStore = {
     const novo = {
       lojaId,
       area: dados.area || "", nome: dados.nome, local: dados.local || "",
+      enderecoRua: dados.enderecoRua || "", enderecoNumero: dados.enderecoNumero || "",
+      enderecoCep: dados.enderecoCep || "", enderecoBairro: dados.enderecoBairro || "",
       contato: dados.contato || "", tipo: dados.tipo || "", tipoDetalhe: dados.tipoDetalhe || "", responsavel: dados.responsavel || "",
       observacoes: dados.observacoes || "", statusProspeccao: dados.statusProspeccao || "Prospecção",
       dataCadastro: new Date().toISOString().slice(0, 10), ehParceiro: false,

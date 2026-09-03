@@ -172,6 +172,8 @@ const localStore = {
       area: dados.area || "",
       nome: dados.nome,
       local: dados.local || "",
+      enderecoRua: dados.enderecoRua || "", enderecoNumero: dados.enderecoNumero || "",
+      enderecoCep: dados.enderecoCep || "", enderecoBairro: dados.enderecoBairro || "",
       contato: dados.contato || "",
       tipo: dados.tipo || "",
       tipoDetalhe: dados.tipoDetalhe || "",
