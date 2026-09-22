@@ -1,8 +1,11 @@
 /* Router por hash (#/...). Cada rota renderiza uma view dentro de #app. */
 
-import { renderParceirosHub } from "./views/parceiros-hub.js";
+import { renderInicio } from "./views/inicio.js";
+import { renderProspeccao } from "./views/prospeccao.js";
+import { renderParceiros } from "./views/parceiros-list.js";
 import { renderFichaParceiro } from "./views/ficha-parceiro.js";
-import { renderKanbanHub } from "./views/kanban-hub.js";
+import { renderKanbanPipeline } from "./views/kanban-pipeline.js";
+import { renderProximosPassos } from "./views/kanban-proximos-passos.js";
 import { renderCupons } from "./views/cupons.js";
 import { renderLancamentos } from "./views/lancamentos.js";
 import { renderDashboard } from "./views/dashboard.js";
@@ -23,21 +26,6 @@ function setActiveNav(name) {
   );
 }
 
-/* Sub-lista (Parceiros: Prospecção/Parceiros Ativos; Kanban: Pipeline/
-   Próximos passos) na sidebar: fica aberta e com o item certo
-   destacado sempre que a rota atual é a dela — fecha sozinha em
-   qualquer outra rota. Não guarda estado próprio — é sempre derivada
-   do hash atual, então nunca fica "aberta" fora do lugar depois de
-   navegar embora. */
-function atualizarNavSub(id, subguia) {
-  const sub = document.getElementById(id);
-  if (!sub) return;
-  sub.classList.toggle("open", !!subguia);
-  sub.querySelectorAll("[data-nav-sub]").forEach((a) =>
-    a.classList.toggle("active", a.dataset.navSub === subguia)
-  );
-}
-
 async function router() {
   if (!location.hash || location.hash === "#") {
     location.replace(location.pathname + "#/");
@@ -49,44 +37,46 @@ async function router() {
   window.scrollTo(0, 0);
 
   try {
-    atualizarNavSub("nav-parceiros-sub", null); // fecha por padrão — os cases donos reabrem
-    atualizarNavSub("nav-kanban-sub", null);
     switch (rota) {
       case "":
       case undefined:
-        setActiveNav("dashboard");
-        await renderDashboard(app);
+        setActiveNav("inicio");
+        await renderInicio(app);
         break;
-      case "parceiros": {
+      case "pipeline":
+        setActiveNav("pipeline");
+        await renderKanbanPipeline(app);
+        break;
+      case "proximos-passos": // sem link na sidebar (ver decisão da reforma de nav) — continua acessível direto
+        await renderProximosPassos(app);
+        break;
+      case "parceiros":
+        if (param === "prospeccao") { // rota antiga (reforma de navegação)
+          location.replace(location.pathname + "#/prospeccao");
+          return;
+        }
         setActiveNav("parceiros");
-        const subguia = ["prospeccao", "ativos"].includes(param) ? param : "prospeccao";
-        atualizarNavSub("nav-parceiros-sub", subguia);
-        await renderParceirosHub(app, subguia);
+        await renderParceiros(app);
         break;
-      }
+      case "prospeccao":
+        setActiveNav("prospeccao");
+        await renderProspeccao(app);
+        break;
       case "parceiro":
         setActiveNav("parceiros");
-        atualizarNavSub("nav-parceiros-sub", "ativos");
         await renderFichaParceiro(app, param);
         break;
-      case "kanban": {
-        setActiveNav("kanban");
-        const subguia = ["pipeline", "proximos-passos"].includes(param) ? param : "pipeline";
-        atualizarNavSub("nav-kanban-sub", subguia);
-        await renderKanbanHub(app, subguia);
-        break;
-      }
       case "cupons":
         setActiveNav("cupons");
         await renderCupons(app);
         break;
+      case "desempenho":
+        setActiveNav("desempenho");
+        await renderDashboard(app);
+        break;
       case "lancamentos":
         setActiveNav("lancamentos");
         await renderLancamentos(app);
-        break;
-      case "dashboard":
-        setActiveNav("dashboard");
-        await renderDashboard(app);
         break;
       case "equipe":
         setActiveNav("equipe");
@@ -98,6 +88,13 @@ async function router() {
       case "acessos":
         await renderAcessos(app);
         break;
+      // ---- redirects de rotas antigas (reforma de navegação) ----
+      case "dashboard":
+        location.replace(location.pathname + "#/desempenho");
+        return;
+      case "kanban":
+        location.replace(location.pathname + `#/${param === "proximos-passos" ? "proximos-passos" : "pipeline"}`);
+        return;
       default:
         app.innerHTML = `<a class="back-link" href="#/">← Voltar</a>
           <div class="empty">Página não encontrada.</div>`;

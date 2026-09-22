@@ -145,19 +145,13 @@ button { font: inherit; }
 .side-nav a.active { background: rgba(255,255,255,0.18); color: #fff; }
 .ni-ic { display: inline-flex; align-items: center; justify-content: center; width: 18px; flex-shrink: 0; opacity: 0.9; }
 
-/* Sub-lista que expande sob um item da sidebar (ex.: Parceiros → Prospecção/
-   Leads/Parceiros Ativos) — aberta/fechada conforme a rota atual, ver
-   atualizarNavParceiros() em app.js, não por clique manual. */
-.side-nav-sub { display: none; flex-direction: column; gap: 2px; padding: 2px 0 4px 26px; }
-.side-nav-sub.open { display: flex; }
-.side-nav-sub a {
-  display: flex; align-items: center;
-  padding: 8px 12px; border-radius: var(--r-sm);
-  color: rgba(255,255,255,0.65); font-weight: 600; font-size: 13px;
-  transition: background 0.12s, color 0.12s;
+/* rótulo de categoria (ex.: "Parceiros", "Operação") — separa grupos de
+   abas na sidebar, não é clicável */
+.side-nav-label {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em;
+  color: rgba(255,255,255,0.5); font-weight: 700;
+  padding: 16px 12px 4px;
 }
-.side-nav-sub a:hover { background: rgba(255,255,255,0.10); color: #fff; }
-.side-nav-sub a.active { background: rgba(255,255,255,0.18); color: #fff; }
 
 .main { flex: 1; min-width: 0; }
 .topbar {
@@ -535,6 +529,22 @@ button { font: inherit; }
 
 .empty { padding: 28px 18px; text-align: center; color: var(--text-faint); font-size: 14px; }
 .muted { color: var(--text-faint); }
+.section-hint { font-size: 12px; font-weight: 600; color: var(--text-faint); }
+
+/* lista de Parceiros em colunas fixas (Parceiro/Responsável/Cupom/Status)
+   — mesmo grid-template no cabeçalho e nas linhas, pra tudo alinhar */
+.parceiros-cols { grid-template-columns: 26px minmax(200px, 1.7fr) 160px 130px 120px auto; }
+.parceiros-head-row {
+  display: grid; align-items: center; gap: 14px;
+  padding: 0 18px 8px;
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-faint); font-weight: 700;
+}
+.list-row.parceiro-row { display: grid; align-items: center; gap: 14px; }
+.pr-col-sub { font-size: 12px; color: var(--text-faint); margin-top: 2px; }
+.pr-col-cupom { font-weight: 800; }
+.pr-col-vazio { color: var(--text-faint); font-weight: 400; }
+.pr-actions { display: flex; align-items: center; gap: 4px; justify-self: end; }
 
 .tag {
   display: inline-block; padding: 3px 10px; border-radius: 999px;
@@ -613,6 +623,11 @@ button { font: inherit; }
 /* cupom pausado — risco mostrando que está fora do ar */
 .cupom-pausado { text-decoration: line-through; opacity: 0.55; }
 
+/* nome do cupom na aba Cupons: clicável, abre o mesmo modal de editar
+   cupom usado na Ficha do Parceiro */
+.cupom-nome-hover { cursor: pointer; }
+.cupom-nome-hover:hover { text-decoration: underline; }
+
 /* ================= DETALHE (parceiro) ================= */
 .detail-head {
   display: flex; align-items: flex-start; justify-content: space-between;
@@ -649,7 +664,40 @@ button { font: inherit; }
 }
 .stat-num { font-family: var(--font-display); font-size: 24px; color: var(--accent-dark); }
 .stat-label { font-size: 12.5px; color: var(--text-soft); font-weight: 600; margin-top: 2px; }
+.stat-sub { font-size: 11px; color: var(--text-faint); margin-top: 3px; }
 .stat[data-stat-tip] { cursor: help; }
+
+/* callout de alerta de qualidade de dado (ex.: Início) — mesma estrutura
+   do .note neutro, só com tom âmbar pra chamar atenção */
+.note--warn {
+  background: var(--c-amber-bg); color: var(--text);
+  border: 1px solid var(--c-amber-fg);
+}
+.note--warn .note-i { color: var(--c-amber-fg); }
+.note--clicavel { cursor: pointer; transition: filter 0.12s; }
+.note--clicavel:hover, .note--clicavel:focus-visible { filter: brightness(0.96); }
+
+/* grade de lojas (Início) — sempre 3 por linha, janela maior, pra número/
+   endereço ficarem alinhados entre os cards de uma mesma fileira */
+.lojas-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 26px; }
+@media (max-width: 900px) { .lojas-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 560px) { .lojas-grid { grid-template-columns: 1fr; } }
+
+/* cards "janela" por loja — nome grande, endereço muted (altura reservada
+   pra 2 linhas, pra o número ficar na mesma altura mesmo quando o
+   endereço de um card é mais curto que o do vizinho), número grande
+   embaixo; tracejado quando a loja ainda não tem parceiro nenhum */
+.loja-card-nome { font-family: var(--font-display); font-size: 18px; color: var(--accent-dark); }
+.loja-card-endereco { font-size: 12.5px; color: var(--text-faint); margin-top: 3px; min-height: 32px; line-height: 1.35; }
+.loja-card-num { font-family: var(--font-display); font-size: 30px; color: var(--accent-dark); margin-top: 12px; }
+.loja-card-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-soft); font-weight: 700; margin-top: 2px; }
+.loja-card { padding: 20px 22px; }
+.loja-card--vazia { border-style: dashed; }
+
+/* etiqueta † num rótulo do funil bruto — sinaliza rótulo que, nos dados,
+   sempre acompanha parceiros já fechados (mesmo estágio de "Fechado",
+   sob um nome antigo/divergente) */
+.funil-bruto-dup { color: var(--c-red-fg); cursor: help; }
 
 /* ================= CARD DE GRÁFICO ================= */
 .chart-card {

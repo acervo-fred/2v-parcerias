@@ -155,6 +155,8 @@ const localStore = {
     const lojaId = await lojaAtualIdOuErro();
     return structuredClone(db.parceiros.filter((p) => p.lojaId === lojaId));
   },
+  // sem filtro de loja — usado pelo comparativo "parceiros por loja" no Início
+  async listParceirosTodasLojas() { return structuredClone(db.parceiros); },
   async getParceiro(id) {
     const p = db.parceiros.find((x) => x.id === id);
     return p ? structuredClone(p) : null;

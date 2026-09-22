@@ -4,7 +4,7 @@
 import { store } from "../data/store.js";
 import { esc } from "../ui/dom.js";
 import { badgeFromLista } from "../ui/badges.js";
-import { validadeCupomTexto, cupomEm50, chaveCupom, statusCupomEfetivo } from "../util/cupom.js";
+import { cupomEm50, chaveCupom, statusCupomEfetivo } from "../util/cupom.js";
 import { openModal, fieldText, fieldTextarea, readValue } from "../ui/modal.js";
 import { fieldResponsavel, wireResponsavelField, readResponsaveis } from "../ui/campo-responsavel.js";
 import { abrirNovoParceiro, abrirEditarParceiro } from "./cadastros.js";
@@ -45,6 +45,14 @@ export async function renderParceiros(app) {
     </div>
     <div class="filter-row" id="filtros"></div>
 
+    <div class="parceiros-head-row parceiros-cols">
+      <span></span>
+      <span>Parceiro</span>
+      <span>Responsável</span>
+      <span>Cupom</span>
+      <span>Status</span>
+      <span></span>
+    </div>
     <div class="list-card" id="lista"></div>
   `;
 
@@ -128,20 +136,22 @@ export async function renderParceiros(app) {
 }
 
 function row(p, listas, grupos, selecionados) {
-  const contatoValidade = [p.contato, validadeCupomTexto(p, grupos)].filter(Boolean).join(" · ");
   const statusEfetivo = statusCupomEfetivo(p);
   const pausado = statusEfetivo === "Pausado";
-  const classesCupom = [cupomEm50(p, grupos) ? "cupom-codigo--50" : "", pausado ? "cupom-pausado" : ""].filter(Boolean).join(" ");
-  return `<div class="list-row clickable" data-id="${esc(p.id)}">
+  const classesCupom = ["pr-col-cupom", cupomEm50(p, grupos) ? "cupom-codigo--50" : "", pausado ? "cupom-pausado" : ""].filter(Boolean).join(" ");
+  return `<div class="list-row parceiro-row parceiros-cols clickable" data-id="${esc(p.id)}">
     <input type="checkbox" class="row-select edit-only" data-id="${esc(p.id)}" ${selecionados.has(p.id) ? "checked" : ""} />
-    <div class="lr-main">
-      <div class="lr-title lr-title-normal"><strong${classesCupom ? ` class="${classesCupom}"` : ""}>${esc((p.cupom || "").toUpperCase())}</strong> ${esc(p.nome)}${p.responsavel ? ` — ${esc(p.responsavel)}` : ""}</div>
-      <div class="lr-sub">${esc(contatoValidade)}</div>
+    <div>
+      <div class="lr-title">${esc(p.nome)}</div>
+      ${p.tipo ? `<div class="pr-col-sub">${esc(p.tipo)}</div>` : ""}
     </div>
-    ${badgeFromLista(listas.statusCupom, statusEfetivo)}
-    <button class="btn btn-sm btn-ghost edit-only" data-action="pausar" title="${pausado ? "Reativar cupom" : "Pausar cupom"}">${pausado ? "Reativar cupom" : "Pausar cupom"}</button>
-    <button class="icon-btn edit-only" data-action="editar" title="Editar">✎</button>
-    <span class="muted">›</span>
+    <div>${esc(p.responsavel || "—")}</div>
+    <div>${p.cupom ? `<span class="${classesCupom}">${esc(p.cupom.toUpperCase())}</span>` : `<span class="pr-col-vazio">—</span>`}</div>
+    <div>${badgeFromLista(listas.statusCupom, statusEfetivo)}</div>
+    <span class="pr-actions edit-only">
+      <button class="btn btn-sm btn-ghost" data-action="pausar" title="${pausado ? "Reativar cupom" : "Pausar cupom"}">${pausado ? "Reativar cupom" : "Pausar cupom"}</button>
+      <button class="icon-btn" data-action="editar" title="Editar">✎</button>
+    </span>
   </div>`;
 }
 

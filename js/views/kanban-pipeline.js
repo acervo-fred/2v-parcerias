@@ -15,7 +15,8 @@
    propósito, mesmo espírito do painel de contagem abaixo.
 
    A lista de "Próximas ações" que ficava no rodapé desta tela agora
-   é a sub-guia "Próximos passos" (ver kanban-proximos-passos.js). */
+   é a tela separada "A Fazer" (ver kanban-proximos-passos.js) — sem
+   link na sidebar por ora, acessível direto em #/proximos-passos. */
 
 import { esc, formatDataBR } from "../ui/dom.js";
 import { store } from "../data/store.js";

@@ -21,6 +21,7 @@ import { acaoRowHtml } from "../ui/acao-row.js";
 import { acoesDe, adicionarAcao, editarAcao, concluirAcao, excluirAcao, responsaveisDe, STAGE_META } from "../data/funil.js";
 import { chaveCupom, validadeCupomTexto, cupomEm50 } from "../util/cupom.js";
 import { dedupLancamentos } from "../util/periodo.js";
+import { abrirCupomDoParceiro } from "./cadastros.js";
 
 const INTERACTION_META = {
   email: { label: "E-mail", cor: "blue" },
@@ -38,7 +39,7 @@ function avisarMudanca() {
 export async function renderFichaParceiro(app, id) {
   const partner = await store.getPartner(id);
   if (!partner) {
-    app.innerHTML = `<a class="back-link" href="#/parceiros/ativos">← Voltar para parceiros</a>
+    app.innerHTML = `<a class="back-link" href="#/parceiros">← Voltar para parceiros</a>
       <div class="empty">Parceiro não encontrado.</div>`;
     return;
   }
@@ -66,7 +67,7 @@ export async function renderFichaParceiro(app, id) {
   const acoesPendentes = acoesDe(partner).filter((a) => !a.concluidaEm);
 
   app.innerHTML = `
-    <a class="back-link" href="#/parceiros/ativos">← Voltar para parceiros</a>
+    <a class="back-link" href="#/parceiros">← Voltar para parceiros</a>
 
     <div class="detail-head">
       <div>
@@ -141,7 +142,7 @@ export async function renderFichaParceiro(app, id) {
       if (!confirm(`Excluir "${partner.name}"?\n\nOs dados de lançamento do cupom em Base de dados também serão apagados. Não dá pra desfazer.\n\nDeseja prosseguir?`)) return;
       await store.removeParceiro(partner.id);
       await store.removePartner(partner.id);
-      location.hash = "#/parceiros/ativos";
+      location.hash = "#/parceiros";
     },
   };
   app.querySelectorAll("[data-act]").forEach((btn) => {
@@ -225,51 +226,6 @@ function couponRowAntigo(parceiro, cuponsIrmaos, listas, uso, fat, grupos) {
       ${outros.length ? `<div class="lr-sub">Também usado por (leads): ${esc(outros.join(", "))}</div>` : ""}
     </div>
   </div>`;
-}
-
-async function abrirCupomDoParceiro(parceiro, cuponsIrmaos, grupos, listas) {
-  const novo = !parceiro.cupom;
-  const outros = cuponsIrmaos.filter((p) => p.id !== parceiro.id).map((p) => p.nome);
-  openModal({
-    title: novo ? "Novo cupom" : "Editar cupom",
-    subtitle: outros.length ? `Também vale pra (leads): ${outros.join(", ")}` : parceiro.nome,
-    submitLabel: novo ? "Adicionar" : "Salvar alterações",
-    wide: true,
-    bodyHtml: `
-      <div class="field-2col">
-        ${fieldText("cupom", "Código do cupom", { required: true, value: parceiro.cupom || "" })}
-        ${fieldSelect("statusCupom", "Status do cupom", listas.statusCupom, { value: parceiro.statusCupom || "Ativo" })}
-      </div>
-      ${fieldText("periodoDesconto", "Período de desconto", { value: parceiro.periodoDesconto || "", placeholder: "Ex.: 50% até 15/05 / 20% até 31/08" })}
-      <div class="field-2col">
-        ${fieldText("dataInicio", "Início da vigência", { type: "date", value: parceiro.dataInicio || "" })}
-        ${fieldText("dataVencimento", "Vencimento", { type: "date", value: parceiro.dataVencimento || "" })}
-      </div>
-      <div class="field">
-        <label for="f_grupoCupom">Grupo</label>
-        <select id="f_grupoCupom" name="grupoCupom">
-          <option value="">Sem grupo</option>
-          ${grupos.map((g) => `<option value="${g.numero}" ${String(parceiro.grupoCupom || "") === String(g.numero) ? "selected" : ""}>${esc(g.nome)}</option>`).join("")}
-        </select>
-      </div>
-    `,
-    onSubmit: async (form) => {
-      const cupom = readValue(form, "cupom");
-      if (!cupom) throw new Error("Informe o código do cupom.");
-      const grupoValor = readValue(form, "grupoCupom");
-      const campos = {
-        cupom,
-        statusCupom: readValue(form, "statusCupom"),
-        periodoDesconto: readValue(form, "periodoDesconto"),
-        dataInicio: readValue(form, "dataInicio"),
-        dataVencimento: readValue(form, "dataVencimento"),
-        grupoCupom: grupoValor ? Number(grupoValor) : "",
-      };
-      if (novo) await store.fecharParceria(parceiro.id, campos);
-      else await Promise.all(cuponsIrmaos.map((p) => store.updateParceiro(p.id, campos)));
-      avisarMudanca();
-    },
-  });
 }
 
 /* ---------- Modais ---------- */

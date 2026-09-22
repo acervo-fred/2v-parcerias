@@ -18,6 +18,7 @@ import { dedupLancamentos, lancamentoNoPeriodo } from "../util/periodo.js";
 import { agruparParceirosPorCupom, chaveCupom, descontoAtual, statusCupomEfetivo } from "../util/cupom.js";
 import { usuarioAtual } from "../data/auth.js";
 import { openModal, fieldText, readValue } from "../ui/modal.js";
+import { abrirCupomDoParceiro } from "./cadastros.js";
 
 const NUM_GRUPOS = 4;
 const DESCONTO_PADRAO = 20;
@@ -123,10 +124,11 @@ function csvCampo(valor) {
 
 export async function renderCupons(app) {
   const podeEditar = !!usuarioAtual();
-  const [parceiros, grupos, lancamentosBrutos] = await Promise.all([
+  const [parceiros, grupos, lancamentosBrutos, listas] = await Promise.all([
     store.listParceirosFechados(),
     garantirGrupos(),
     store.listLancamentos(),
+    store.getListas(),
   ]);
   const lancamentos = dedupLancamentos(lancamentosBrutos);
   const porIdGrupo = Object.fromEntries(grupos.map((g) => [String(g.numero), g]));
@@ -478,6 +480,14 @@ export async function renderCupons(app) {
     if (ordem.chave === chave) ordem.dir = ordem.dir === "asc" ? "desc" : "asc";
     else { ordem.chave = chave; ordem.dir = "desc"; }
     desenharLista();
+  });
+
+  lista.addEventListener("click", (e) => {
+    const nomeEl = e.target.closest(".cupom-nome-hover");
+    if (!nomeEl) return;
+    const lc = linhasPorChave.get(nomeEl.dataset.chave);
+    if (!lc || !podeEditar) return;
+    abrirCupomDoParceiro(lc.parceiros[0], lc.parceiros, grupos, listas);
   });
 
   lista.addEventListener("change", async (e) => {

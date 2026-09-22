@@ -164,6 +164,9 @@ export const firestoreStore = {
     const lojaId = await lojaAtualIdOuErro();
     return docsWhere(COLLECTIONS.parceiros, "lojaId", lojaId);
   },
+  // sem filtro de loja — usado pelo comparativo "parceiros por loja" no
+  // Início (ver js/views/inicio.js), mesmo padrão de listTasksTodasLojas()
+  async listParceirosTodasLojas() { return allDocs(COLLECTIONS.parceiros); },
   async getParceiro(id) {
     const snap = await getDoc(doc(fdb, COLLECTIONS.parceiros, id));
     return snap.exists() ? { id: snap.id, ...snap.data() } : null;

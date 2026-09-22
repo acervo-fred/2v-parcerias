@@ -151,6 +151,56 @@ export async function abrirFecharParceria(parceiro) {
   });
 }
 
+/* Editar cupom de um parceiro já fechado — mesmo modal usado pela Ficha
+   do Parceiro ("Cupom vinculado") e pela aba Cupons (clicar num cupom
+   da lista). cuponsIrmaos: todo mundo que compartilha o mesmo código
+   (ver chaveCupom em util/cupom.js) — editar aqui atualiza todos de
+   uma vez, pra nunca ficarem com dados divergentes do mesmo cupom. */
+export async function abrirCupomDoParceiro(parceiro, cuponsIrmaos, grupos, listas) {
+  const novo = !parceiro.cupom;
+  const outros = cuponsIrmaos.filter((p) => p.id !== parceiro.id).map((p) => p.nome);
+  openModal({
+    title: novo ? "Novo cupom" : "Editar cupom",
+    subtitle: outros.length ? `Também vale pra (leads): ${outros.join(", ")}` : parceiro.nome,
+    submitLabel: novo ? "Adicionar" : "Salvar alterações",
+    wide: true,
+    bodyHtml: `
+      <div class="field-2col">
+        ${fieldText("cupom", "Código do cupom", { required: true, value: parceiro.cupom || "" })}
+        ${fieldSelect("statusCupom", "Status do cupom", listas.statusCupom, { value: parceiro.statusCupom || "Ativo" })}
+      </div>
+      ${fieldText("periodoDesconto", "Período de desconto", { value: parceiro.periodoDesconto || "", placeholder: "Ex.: 50% até 15/05 / 20% até 31/08" })}
+      <div class="field-2col">
+        ${fieldText("dataInicio", "Início da vigência", { type: "date", value: parceiro.dataInicio || "" })}
+        ${fieldText("dataVencimento", "Vencimento", { type: "date", value: parceiro.dataVencimento || "" })}
+      </div>
+      <div class="field">
+        <label for="f_grupoCupom">Grupo</label>
+        <select id="f_grupoCupom" name="grupoCupom">
+          <option value="">Sem grupo</option>
+          ${grupos.map((g) => `<option value="${g.numero}" ${String(parceiro.grupoCupom || "") === String(g.numero) ? "selected" : ""}>${esc(g.nome)}</option>`).join("")}
+        </select>
+      </div>
+    `,
+    onSubmit: async (form) => {
+      const cupom = readValue(form, "cupom");
+      if (!cupom) throw new Error("Informe o código do cupom.");
+      const grupoValor = readValue(form, "grupoCupom");
+      const campos = {
+        cupom,
+        statusCupom: readValue(form, "statusCupom"),
+        periodoDesconto: readValue(form, "periodoDesconto"),
+        dataInicio: readValue(form, "dataInicio"),
+        dataVencimento: readValue(form, "dataVencimento"),
+        grupoCupom: grupoValor ? Number(grupoValor) : "",
+      };
+      if (novo) await store.fecharParceria(parceiro.id, campos);
+      else await Promise.all(cuponsIrmaos.map((p) => store.updateParceiro(p.id, campos)));
+      avisarMudanca();
+    },
+  });
+}
+
 /* ---------------- Novo parceiro (direto, sem passar por prospecção) ---------------- */
 export async function abrirNovoParceiro() {
   const listas = await store.getListas();
