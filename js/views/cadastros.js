@@ -6,7 +6,7 @@ import { esc, parseNumeroBR, formatNumeroBR } from "../ui/dom.js";
 import { openModal, fieldText, fieldTextarea, fieldSelect, readValue } from "../ui/modal.js";
 import { htmlCamposEndereco, wireCamposEndereco, lerEnderecoComposto } from "../ui/endereco-fields.js";
 import { PERIODO_TIPOS, PERIODO_MAP, rotuloTipoAtual, calcularDataFim, calcularRotulo, calcularEntradaLancamento } from "../util/periodo.js";
-import { agruparParceirosPorCupom } from "../util/cupom.js";
+import { agruparParceirosPorCupom, periodos50ExtraTexto, lerPeriodos50Extra } from "../util/cupom.js";
 import { garantirPartner } from "../data/funil.js";
 
 function avisarMudanca() {
@@ -181,6 +181,7 @@ export async function abrirCupomDoParceiro(parceiro, cuponsIrmaos, grupos, lista
           ${grupos.map((g) => `<option value="${g.numero}" ${String(parceiro.grupoCupom || "") === String(g.numero) ? "selected" : ""}>${esc(g.nome)}</option>`).join("")}
         </select>
       </div>
+      ${fieldTextarea("periodos50Extra", "Outros períodos de 50% (fora do grupo)", { value: periodos50ExtraTexto(parceiro), placeholder: "12/10/2026 a 16/10/2026", hint: "Um período por linha. Fica registrado no histórico e conta como 50% no Desempenho." })}
     `,
     onSubmit: async (form) => {
       const cupom = readValue(form, "cupom");
@@ -193,6 +194,7 @@ export async function abrirCupomDoParceiro(parceiro, cuponsIrmaos, grupos, lista
         dataInicio: readValue(form, "dataInicio"),
         dataVencimento: readValue(form, "dataVencimento"),
         grupoCupom: grupoValor ? Number(grupoValor) : "",
+        periodos50Extra: lerPeriodos50Extra(readValue(form, "periodos50Extra")),
       };
       if (novo) await store.fecharParceria(parceiro.id, campos);
       else await Promise.all(cuponsIrmaos.map((p) => store.updateParceiro(p.id, campos)));

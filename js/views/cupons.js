@@ -15,7 +15,7 @@
 import { store } from "../data/store.js";
 import { esc, formatMoeda, formatDataBR } from "../ui/dom.js";
 import { dedupLancamentos, lancamentoNoPeriodo } from "../util/periodo.js";
-import { agruparParceirosPorCupom, chaveCupom, descontoAtual, statusCupomEfetivo } from "../util/cupom.js";
+import { agruparParceirosPorCupom, chaveCupom, descontoAtual, statusCupomEfetivo, periodos50 } from "../util/cupom.js";
 import { usuarioAtual } from "../data/auth.js";
 import { openModal, fieldText, readValue } from "../ui/modal.js";
 import { abrirCupomDoParceiro } from "./cadastros.js";
@@ -58,8 +58,8 @@ async function garantirGrupos() {
 // suspensa de desconto, sem depender de qual dos dois está "ativo hoje".
 function periodoParaPercentual(rep, porIdGrupo, percentual) {
   if (percentual === DESCONTO_ESPECIAL) {
-    const g = porIdGrupo[String(rep.grupoCupom || "")];
-    return { inicio: g?.inicio || "", fim: g?.fim || "" };
+    const per = periodos50(rep, porIdGrupo).at(-1); // o mais recente (grupo ou avulso)
+    return { inicio: per?.inicio || "", fim: per?.fim || "" };
   }
   return { inicio: rep.dataInicio || "", fim: rep.dataVencimento || "" };
 }

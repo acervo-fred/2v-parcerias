@@ -26,7 +26,7 @@
 import { store } from "../data/store.js";
 import { esc, formatMoeda } from "../ui/dom.js";
 import { lancamentoNoPeriodo, dedupLancamentos, inicioSemanaISO, fimSemanaISO, chaveSemana, rotuloSemanaCurto, chaveMes, rotuloMesCurto } from "../util/periodo.js";
-import { agruparParceirosPorCupom, chaveCupom, cupomEm50 } from "../util/cupom.js";
+import { agruparParceirosPorCupom, chaveCupom, cupomEm50, periodos50 } from "../util/cupom.js";
 
 const MES_NOMES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
 const TOP_N_CUPONS = 8;
@@ -468,9 +468,7 @@ function mesesNoPeriodo(de, ate) {
    lançamentos dos dois lados — é esperado, não é bug. */
 function cupomEhEspecial(lancamento, parceiro, porIdGrupo) {
   if (!parceiro) return false;
-  const g = porIdGrupo[String(parceiro.grupoCupom || "")];
-  if (!g || !g.inicio || !g.fim) return false;
-  return lancamentoNoPeriodo(lancamento, g.inicio, g.fim);
+  return periodos50(parceiro, porIdGrupo).some((per) => lancamentoNoPeriodo(lancamento, per.inicio, per.fim));
 }
 function filtrarPorTier(lancamentos, porId, porIdGrupo, tier) {
   if (tier === "ambos") return lancamentos;
