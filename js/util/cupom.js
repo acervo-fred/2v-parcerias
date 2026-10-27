@@ -36,60 +36,53 @@ export function agruparParceirosPorCupom(parceiros) {
   return [...mapa.values()];
 }
 
-/* Todos os períodos de 50% que valem pro cupom: o do grupo (vale pra
-   todo mundo do grupo, mas só guarda UM período — o mais recente) mais
-   os períodos avulsos gravados no próprio parceiro (periodos50Extra,
-   [{inicio, fim}] em ISO) — histórico de ações pontuais de 50% fora do
-   grupo, que não podem sobrescrever o período do grupo sem apagar o
-   registro das ações anteriores. Ordenado do mais antigo pro mais novo. */
+// desconto base do cupom (fora de qualquer período especial)
+export function descontoBase(parceiro) {
+  return Number(parceiro?.descontoBase) || DESCONTO_PADRAO;
+}
+
+/* Períodos de desconto gravados no próprio cupom (periodosDesconto,
+   [{percentual, inicio, fim}] em ISO, editados no modal "Editar cupom"
+   pelo calendário). O formato antigo periodos50Extra ([{inicio, fim}],
+   sempre 50%) continua sendo lido até o cupom ser salvo de novo. */
+export function periodosDoCupom(parceiro) {
+  const lista = [];
+  for (const per of parceiro?.periodosDesconto || []) {
+    if (per?.inicio && per?.fim) lista.push({ percentual: Number(per.percentual) || DESCONTO_ESPECIAL, inicio: per.inicio, fim: per.fim });
+  }
+  for (const per of parceiro?.periodos50Extra || []) {
+    if (per?.inicio && per?.fim) lista.push({ percentual: DESCONTO_ESPECIAL, inicio: per.inicio, fim: per.fim });
+  }
+  return lista.sort((a, b) => a.inicio.localeCompare(b.inicio));
+}
+
+/* Todos os períodos especiais (desconto acima do base) do cupom: o do
+   grupo legado (grupoCupom) mais os do próprio cupom. Ordenado do mais
+   antigo pro mais novo. Usado pelo Desempenho pra separar 20%/50%. */
 export function periodos50(parceiro, porIdGrupo) {
   const lista = [];
   const g = porIdGrupo[String(parceiro?.grupoCupom || "")];
-  if (g && g.inicio && g.fim) lista.push({ inicio: g.inicio, fim: g.fim });
-  for (const per of parceiro?.periodos50Extra || []) {
-    if (per?.inicio && per?.fim) lista.push({ inicio: per.inicio, fim: per.fim });
-  }
-  return lista.sort((a, b) => a.inicio.localeCompare(b.inicio));
+  if (g && g.inicio && g.fim) lista.push({ percentual: Number(g.percentual) || DESCONTO_ESPECIAL, inicio: g.inicio, fim: g.fim });
+  lista.push(...periodosDoCupom(parceiro));
+  const base = descontoBase(parceiro);
+  return lista.filter((p) => p.percentual > base).sort((a, b) => a.inicio.localeCompare(b.inicio));
 }
 
-/* Texto <-> lista de períodos avulsos de 50%, pro campo do modal de
-   cupom: uma linha por período, "DD/MM/AAAA a DD/MM/AAAA". */
-export function periodos50ExtraTexto(parceiro) {
-  return (parceiro?.periodos50Extra || []).map((per) => `${formatDataBR(per.inicio)} a ${formatDataBR(per.fim)}`).join("\n");
-}
-export function lerPeriodos50Extra(texto) {
-  const paraISO = (br) => {
-    const m = br.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-    return m ? `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}` : "";
-  };
-  const lista = [];
-  for (const linha of (texto || "").split("\n").map((l) => l.trim()).filter(Boolean)) {
-    const partes = linha.split(/\s+(?:a|até|-|–)\s+/i);
-    const inicio = paraISO(partes[0] || "");
-    const fim = paraISO(partes[1] || "");
-    if (partes.length !== 2 || !inicio || !fim) throw new Error(`Período de 50% inválido: "${linha}". Use DD/MM/AAAA a DD/MM/AAAA.`);
-    if (fim < inicio) throw new Error(`Período de 50% com fim antes do início: "${linha}".`);
-    lista.push({ inicio, fim });
-  }
-  return lista.sort((a, b) => a.inicio.localeCompare(b.inicio));
-}
-
-/* 20% por padrão (dentro da vigência do próprio cupom, dataInicio/
-   dataVencimento) — 50% só enquanto hoje estiver dentro de algum
-   período de 50% do cupom (do grupo ou avulso, ver periodos50). Devolve também as datas de
-   início/fim de qual dos dois estiver valendo. */
+/* Desconto valendo hoje: o percentual do período especial (grupo ou do
+   próprio cupom) que cobre hoje, senão o desconto base. Devolve também
+   as datas de início/fim de qual estiver valendo. */
 export function descontoAtual(parceiro, grupos) {
   const hoje = new Date().toISOString().slice(0, 10);
   const porIdGrupo = Object.fromEntries((grupos || []).map((g) => [String(g.numero), g]));
-  const p50 = periodos50(parceiro, porIdGrupo).find((per) => hoje >= per.inicio && hoje <= per.fim);
-  if (p50) return { percentual: DESCONTO_ESPECIAL, inicio: p50.inicio, fim: p50.fim };
-  return { percentual: DESCONTO_PADRAO, inicio: parceiro.dataInicio || "", fim: parceiro.dataVencimento || "" };
+  const per = periodos50(parceiro, porIdGrupo).filter((p) => hoje >= p.inicio && hoje <= p.fim).at(-1);
+  if (per) return { percentual: per.percentual, inicio: per.inicio, fim: per.fim, especial: true };
+  return { percentual: descontoBase(parceiro), inicio: parceiro.dataInicio || "", fim: parceiro.dataVencimento || "", especial: false };
 }
 
-// hoje o cupom está no período de 50% (ver descontoAtual) — usado pra
-// destacar visualmente o código do cupom onde ele aparece como rótulo
+// hoje o cupom está num período especial (ver descontoAtual) — usado
+// pra destacar visualmente o código do cupom onde ele aparece como rótulo
 export function cupomEm50(parceiro, grupos) {
-  return descontoAtual(parceiro, grupos).percentual === DESCONTO_ESPECIAL;
+  return descontoAtual(parceiro, grupos).especial;
 }
 
 // Status "efetivo" pro cupom — some com um vencido (dataVencimento no
@@ -110,8 +103,8 @@ export function statusCupomEfetivo(parceiro) {
    literal "DD/MM/AAAA", sinalizando que falta preencher. */
 export function validadeCupomTexto(parceiro, grupos) {
   const porIdGrupo = Object.fromEntries((grupos || []).map((g) => [String(g.numero), g]));
-  const ultimo50 = periodos50(parceiro, porIdGrupo).at(-1);
+  const ultimo = periodos50(parceiro, porIdGrupo).at(-1);
   const fimPadrao = parceiro.dataVencimento ? formatDataBR(parceiro.dataVencimento) : "DD/MM/AAAA";
-  const fimEspecial = ultimo50 ? formatDataBR(ultimo50.fim) : "DD/MM/AAAA";
-  return `${DESCONTO_PADRAO}% até ${fimPadrao} / ${DESCONTO_ESPECIAL}% até ${fimEspecial}`;
+  const fimEspecial = ultimo ? formatDataBR(ultimo.fim) : "DD/MM/AAAA";
+  return `${descontoBase(parceiro)}% até ${fimPadrao} / ${ultimo?.percentual || DESCONTO_ESPECIAL}% até ${fimEspecial}`;
 }

@@ -22,7 +22,7 @@
 import { store } from "../data/store.js";
 import { esc, formatMoeda, formatDataBR } from "../ui/dom.js";
 import { dedupLancamentos, lancamentoNoPeriodo } from "../util/periodo.js";
-import { agruparParceirosPorCupom, chaveCupom, normalizarCupom, statusCupomEfetivo } from "../util/cupom.js";
+import { agruparParceirosPorCupom, chaveCupom, normalizarCupom, statusCupomEfetivo, periodosDoCupom } from "../util/cupom.js";
 import { usuarioAtual } from "../data/auth.js";
 import { openModal, fieldText, fieldSelect, readValue } from "../ui/modal.js";
 import { abrirCupomDoParceiro } from "./cadastros.js";
@@ -82,8 +82,9 @@ export async function renderCupons(app) {
   }
   let membrosPorGrupo = new Map(grupos.map((g) => [g.id, membrosDoGrupo(g)]));
 
-  // todos os períodos especiais de um cupom: um por grupo do qual ele
-  // participa + os avulsos antigos (periodos50Extra), em ordem de data
+  // todos os períodos de desconto de um cupom: um por grupo do qual ele
+  // participa + os do próprio cupom (calendário do modal "Editar
+  // cupom", ver periodosDoCupom), em ordem de data
   function periodosEspeciais(chave) {
     const lista = [];
     for (const g of grupos) {
@@ -91,9 +92,7 @@ export async function renderCupons(app) {
       lista.push({ inicio: g.inicio, fim: g.fim, percentual: g.percentual || PERCENTUAL_GRUPO_PADRAO, origem: g.nome });
     }
     const rep = linhasPorChave.get(chave)?.parceiros[0];
-    for (const per of rep?.periodos50Extra || []) {
-      lista.push({ inicio: per.inicio, fim: per.fim, percentual: PERCENTUAL_GRUPO_PADRAO, origem: "avulso" });
-    }
+    for (const per of periodosDoCupom(rep)) lista.push({ ...per, origem: "do cupom" });
     return lista.sort((a, b) => a.inicio.localeCompare(b.inicio));
   }
   function descontoBase(lc) {
@@ -101,11 +100,15 @@ export async function renderCupons(app) {
   }
   function descontoHoje(lc) {
     const hoje = hojeISO();
-    const per = periodosEspeciais(lc.chave).find((p) => hoje >= p.inicio && hoje <= p.fim);
-    return per ? { percentual: per.percentual, especial: per } : { percentual: descontoBase(lc), especial: null };
+    const per = periodosEspeciais(lc.chave).filter((p) => hoje >= p.inicio && hoje <= p.fim).at(-1);
+    if (!per) return { percentual: descontoBase(lc), especial: null };
+    return { percentual: per.percentual, especial: per.percentual > descontoBase(lc) ? per : null };
   }
+  // "Período 50%" = qualquer período com desconto acima do base do cupom
   function lancamentoEspecial(l, chave) {
-    return periodosEspeciais(chave).some((per) => lancamentoNoPeriodo(l, per.inicio, per.fim));
+    const lc = linhasPorChave.get(chave);
+    const base = lc ? descontoBase(lc) : DESCONTO_BASE_PADRAO;
+    return periodosEspeciais(chave).some((per) => per.percentual > base && lancamentoNoPeriodo(l, per.inicio, per.fim));
   }
 
   // uso/faturamento por cupom dentro de De/Até, opcionalmente só nos
@@ -278,7 +281,7 @@ export async function renderCupons(app) {
     const periodos = periodosEspeciais(lc.chave);
     const empresas = lc.parceiros.map((p) => p.nome).join(", ");
     const periodosHtml = periodos.length
-      ? periodos.map((p) => `<span class="badge ${p.inicio <= hojeISO() && hojeISO() <= p.fim ? "badge--amber" : "badge--gray"}" title="${esc(p.origem)} · ${p.percentual}%" style="margin:1px 3px 1px 0">${esc(fmtIntervaloCurto(p.inicio, p.fim))}</span>`).join("")
+      ? periodos.map((p) => `<span class="badge ${p.inicio <= hojeISO() && hojeISO() <= p.fim ? "badge--amber" : "badge--gray"}" title="${esc(p.origem)}" style="margin:1px 3px 1px 0">${p.percentual}% · ${esc(fmtIntervaloCurto(p.inicio, p.fim))}</span>`).join("")
       : `<span class="muted">—</span>`;
     return `<tr class="rank-row">
       <td>
@@ -395,7 +398,7 @@ export async function renderCupons(app) {
                 <td class="num">${stats.get(lc.chave)?.uso || 0}</td>
                 <td class="num">${esc(formatMoeda(stats.get(lc.chave)?.fat || 0))}</td>
                 <td>${descontoBase(lc)}%</td>
-                <td style="font-size:11.5px">${outros.length ? outros.map((p) => `<span class="badge badge--gray" title="${esc(p.origem)}" style="margin:1px 3px 1px 0">${esc(fmtIntervaloCurto(p.inicio, p.fim))}</span>`).join("") : `<span class="muted">—</span>`}</td>
+                <td style="font-size:11.5px">${outros.length ? outros.map((p) => `<span class="badge badge--gray" title="${esc(p.origem)}" style="margin:1px 3px 1px 0">${p.percentual}% · ${esc(fmtIntervaloCurto(p.inicio, p.fim))}</span>`).join("") : `<span class="muted">—</span>`}</td>
               </tr>`;
             }).join("") : `<tr><td colspan="5" class="empty">Nenhum cupom neste grupo.</td></tr>`}
           </tbody>

@@ -941,3 +941,31 @@ body:not(.is-admin) .admin-only { display: none !important; }
 }
 .acesso-linha:last-child { border-bottom: none; }
 .acesso-acoes { display: flex; gap: 8px; flex-shrink: 0; }
+
+/* ---------- Editor de períodos de desconto (modal Editar cupom) ---------- */
+.pd-lista { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.pd-item { display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px 4px 10px; border-radius: 999px; background: var(--c-amber-bg); color: var(--c-amber-fg); font-size: 12.5px; }
+.pd-remover { border: 0; background: transparent; color: inherit; font-size: 15px; line-height: 1; cursor: pointer; padding: 0 4px; border-radius: 50%; }
+.pd-remover:hover { background: rgba(0,0,0,0.08); }
+.pd-novo { display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-start; padding: 12px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface); }
+.pd-lado { display: flex; flex-direction: column; gap: 8px; min-width: 170px; flex: 1; }
+.pd-mini { font-size: 12px; font-weight: 600; color: var(--text-soft); }
+.pd-pct { display: flex; align-items: center; gap: 6px; font-weight: 700; }
+.pd-pct input { width: 90px; font-size: 16px; font-weight: 700; }
+.pd-sel { font-size: 12.5px; }
+.pd-erro { font-size: 12px; color: var(--c-red-fg); min-height: 0; }
+.pd-erro:empty { display: none; }
+.pd-lado .btn { align-self: flex-start; }
+.pd-cal { width: 252px; }
+.pd-cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; font-size: 13px; text-transform: capitalize; }
+.pd-nav { border: 1px solid var(--border); background: var(--surface); border-radius: var(--r-sm); width: 28px; height: 28px; cursor: pointer; font-size: 16px; color: var(--text); }
+.pd-nav:hover { background: var(--surface-2); }
+.pd-grade { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.pd-dsem { font-size: 10.5px; text-align: center; color: var(--text-faint); padding-bottom: 2px; }
+.pd-dia { border: 0; background: transparent; height: 32px; border-radius: 6px; cursor: pointer; font-size: 12.5px; color: var(--text); }
+.pd-dia:hover { background: var(--surface-2); }
+.pd-dia--hoje { box-shadow: inset 0 0 0 1px var(--border-strong); }
+.pd-dia--salvo { background: var(--c-amber-bg); color: var(--c-amber-fg); }
+.pd-dia--sel { background: var(--accent-soft); color: var(--accent-dark); }
+.pd-dia--ponta { background: var(--accent); color: var(--accent-contrast); font-weight: 700; }
+.pd-dia--ponta:hover { background: var(--accent-dark); }
