@@ -1,111 +1,44 @@
-/* Cupons — percentual de desconto, período de validade e grupos de
-   cada cupom. O desconto de um cupom só pode ser 20% (padrão) ou 50%
-   (especial) — nunca um valor livre. Estratégia de aumento em grupos:
-   cada grupo (1-4) tem seu próprio período de desconto especial,
-   escalonado; enquanto a data de hoje não estiver dentro do período do
-   grupo, o cupom fica nos 20% padrão. Uso/faturamento por cupom,
-   filtrado por período, pra acompanhar o desempenho de cada grupo.
+/* Cupons — esboço (2026-10-26) do novo modelo, publicado pra uso:
 
-   Consolidação por código de cupom: quando duas empresas parceiras
-   compartilham o mesmo código (ex.: "PARCEIRO20" oferecido a mais de
-   uma empresa), elas contam como um cupom só aqui — uso/faturamento
-   somados, grupo e desconto em sincronia entre as empresas. Só a aba
-   Parceiros mostra cada empresa separadamente. */
+   - Cada cupom tem um DESCONTO BASE próprio (15/20/30/50%, campo
+     descontoBase no parceiro, padrão 20%) — o que vale fora de qualquer
+     ação especial.
+   - GRUPOS são ações de aumento de desconto: cada grupo tem UM período
+     (inicio/fim), um percentual (padrão 50%) e uma lista de cupons
+     (grupo.cupons, códigos). Um cupom pode estar em vários grupos ao
+     longo do tempo — é assim que ele vai e volta do 50%. Uma ação
+     pontual de um cupom só é só um grupo com um cupom.
+     Grupos antigos (sem grupo.cupons) continuam lendo a lista a partir
+     do grupoCupom dos parceiros, até alguém editar os membros.
+   - Aba "Todos os cupons": De/Até + "Período 50%"/"Período 20%", que
+     compilam TODOS os períodos em que cada cupom esteve (ou não) em
+     desconto especial — não é mais um intervalo contínuo.
+   - Aba "Grupos": uma sub-aba por grupo, com período, percentual e
+     membros editáveis.
+
+   Consolidação por código de cupom: empresas que compartilham o mesmo
+   código contam como um cupom só (ver js/util/cupom.js). */
 
 import { store } from "../data/store.js";
 import { esc, formatMoeda, formatDataBR } from "../ui/dom.js";
 import { dedupLancamentos, lancamentoNoPeriodo } from "../util/periodo.js";
-import { agruparParceirosPorCupom, chaveCupom, descontoAtual, statusCupomEfetivo, periodos50 } from "../util/cupom.js";
+import { agruparParceirosPorCupom, chaveCupom, normalizarCupom, statusCupomEfetivo } from "../util/cupom.js";
 import { usuarioAtual } from "../data/auth.js";
-import { openModal, fieldText, readValue } from "../ui/modal.js";
+import { openModal, fieldText, fieldSelect, readValue } from "../ui/modal.js";
 import { abrirCupomDoParceiro } from "./cadastros.js";
 
-const NUM_GRUPOS = 4;
-const DESCONTO_PADRAO = 20;
-const DESCONTO_ESPECIAL = 50;
+const DESCONTOS_BASE = [15, 20, 30, 50];
+const DESCONTO_BASE_PADRAO = 20;
+const PERCENTUAL_GRUPO_PADRAO = 50;
 const DESCRICAO_EXPORT = "50% de desconto em todos os produtos no LM";
 
 function hojeISO() { return new Date().toISOString().slice(0, 10); }
-function diaAnteriorISO(iso) {
-  const [y, m, d] = iso.split("-").map(Number);
-  const dt = new Date(y, m - 1, d);
-  dt.setDate(dt.getDate() - 1);
-  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+function fmtIntervalo(inicio, fim) {
+  return inicio && fim ? `${formatDataBR(inicio)} – ${formatDataBR(fim)}` : "período não definido";
 }
-function diaSeguinteISO(iso) {
-  const [y, m, d] = iso.split("-").map(Number);
-  const dt = new Date(y, m - 1, d);
-  dt.setDate(dt.getDate() + 1);
-  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
-}
-
-// garante que a loja atual já tem os 4 grupos (cria na primeira vez)
-async function garantirGrupos() {
-  let grupos = await store.listGrupos();
-  if (grupos.length === 0) {
-    grupos = [];
-    for (let n = 1; n <= NUM_GRUPOS; n++) {
-      const novo = await store.addGrupo({ numero: n, nome: `Grupo ${n}`, inicio: "", fim: "" });
-      grupos.push(novo);
-    }
-  }
-  return grupos.sort((a, b) => a.numero - b.numero);
-}
-
-// período correspondente a um percentual específico (20% → vigência do
-// próprio cupom, 50% → período especial configurado no grupo do cupom) —
-// usado pra alternar o texto de vigência quando o usuário troca a lista
-// suspensa de desconto, sem depender de qual dos dois está "ativo hoje".
-function periodoParaPercentual(rep, porIdGrupo, percentual) {
-  if (percentual === DESCONTO_ESPECIAL) {
-    const per = periodos50(rep, porIdGrupo).at(-1); // o mais recente (grupo ou avulso)
-    return { inicio: per?.inicio || "", fim: per?.fim || "" };
-  }
-  return { inicio: rep.dataInicio || "", fim: rep.dataVencimento || "" };
-}
-
-function statsPorCupom(lancamentos, de, ate, chavePorParceiroId) {
-  const mapa = new Map();
-  for (const l of lancamentos) {
-    if (!lancamentoNoPeriodo(l, de, ate)) continue;
-    const chave = chavePorParceiroId[l.parceiroId];
-    if (!chave) continue;
-    if (!mapa.has(chave)) mapa.set(chave, { uso: 0, fat: 0 });
-    const a = mapa.get(chave);
-    a.uso += l.quantidadeUso;
-    a.fat += l.faturamentoCupom;
-  }
-  return mapa;
-}
-
-/* Classifica um lançamento em EXATAMENTE um dos 3 baldes (pré/período/pós
-   50% do grupo) — "Pré 50%"/"Período 50%"/"Pós 50%" precisam ser
-   mutuamente exclusivos (senão a soma dos três passa do Total). Um
-   lançamento cujo intervalo (dataInicio–dataFim) atravessa a fronteira do
-   período especial (ex.: uma semana que começa antes e termina dentro)
-   não pode contar em dois baldes ao mesmo tempo — prioridade pro período
-   especial se ele toca o intervalo de qualquer jeito (mesmo critério já
-   usado pelo Dashboard pra classificar 20%/50%, ver cupomEhEspecial em
-   dashboard.js); só cai em "pre50"/"pos50" quando não toca o período
-   especial de jeito nenhum. */
-function classificarBalde50(l, g) {
-  if (!g?.inicio || !g?.fim || !l.dataInicio) return null;
-  if (lancamentoNoPeriodo(l, g.inicio, g.fim)) return "periodo50";
-  const fim = l.dataFim || l.dataInicio;
-  return fim < g.inicio ? "pre50" : "pos50";
-}
-function statsPorCupomBalde50(lancamentos, balde, g, chavePorParceiroId) {
-  const mapa = new Map();
-  for (const l of lancamentos) {
-    if (classificarBalde50(l, g) !== balde) continue;
-    const chave = chavePorParceiroId[l.parceiroId];
-    if (!chave) continue;
-    if (!mapa.has(chave)) mapa.set(chave, { uso: 0, fat: 0 });
-    const a = mapa.get(chave);
-    a.uso += l.quantidadeUso;
-    a.fat += l.faturamentoCupom;
-  }
-  return mapa;
+function fmtIntervaloCurto(inicio, fim) {
+  const curto = (iso) => formatDataBR(iso).slice(0, 5);
+  return `${curto(inicio)}–${curto(fim)}`;
 }
 
 function baixarCSV(linhas, nome) {
@@ -124,225 +57,253 @@ function csvCampo(valor) {
 
 export async function renderCupons(app) {
   const podeEditar = !!usuarioAtual();
-  const [parceiros, grupos, lancamentosBrutos, listas] = await Promise.all([
+  const [parceiros, gruposBrutos, lancamentosBrutos, listas] = await Promise.all([
     store.listParceirosFechados(),
-    garantirGrupos(),
+    store.listGrupos(),
     store.listLancamentos(),
     store.getListas(),
   ]);
   const lancamentos = dedupLancamentos(lancamentosBrutos);
-  const porIdGrupo = Object.fromEntries(grupos.map((g) => [String(g.numero), g]));
+  const grupos = gruposBrutos.sort((a, b) => a.numero - b.numero);
 
   const linhasCupom = agruparParceirosPorCupom(parceiros);
   const chavePorParceiroId = Object.fromEntries(parceiros.map((p) => [p.id, chaveCupom(p)]));
   const linhasPorChave = new Map(linhasCupom.map((lc) => [lc.chave, lc]));
 
-  let periodo = "total"; // "pre50" | "periodo50" | "custom" | "total"
-  let aba = "todos"; // "todos" | "1".."4"
+  /* ---------- modelo ---------- */
+
+  // códigos (chaves) dos cupons de um grupo — lista própria do grupo se
+  // já existir, senão o legado (parceiros com grupoCupom = número)
+  function membrosDoGrupo(g) {
+    if (Array.isArray(g.cupons)) return new Set(g.cupons.map(normalizarCupom));
+    return new Set(linhasCupom
+      .filter((lc) => lc.parceiros.some((p) => String(p.grupoCupom || "") === String(g.numero)))
+      .map((lc) => lc.chave));
+  }
+  let membrosPorGrupo = new Map(grupos.map((g) => [g.id, membrosDoGrupo(g)]));
+
+  // todos os períodos especiais de um cupom: um por grupo do qual ele
+  // participa + os avulsos antigos (periodos50Extra), em ordem de data
+  function periodosEspeciais(chave) {
+    const lista = [];
+    for (const g of grupos) {
+      if (!g.inicio || !g.fim || !membrosPorGrupo.get(g.id)?.has(chave)) continue;
+      lista.push({ inicio: g.inicio, fim: g.fim, percentual: g.percentual || PERCENTUAL_GRUPO_PADRAO, origem: g.nome });
+    }
+    const rep = linhasPorChave.get(chave)?.parceiros[0];
+    for (const per of rep?.periodos50Extra || []) {
+      lista.push({ inicio: per.inicio, fim: per.fim, percentual: PERCENTUAL_GRUPO_PADRAO, origem: "avulso" });
+    }
+    return lista.sort((a, b) => a.inicio.localeCompare(b.inicio));
+  }
+  function descontoBase(lc) {
+    return Number(lc.parceiros[0].descontoBase) || DESCONTO_BASE_PADRAO;
+  }
+  function descontoHoje(lc) {
+    const hoje = hojeISO();
+    const per = periodosEspeciais(lc.chave).find((p) => hoje >= p.inicio && hoje <= p.fim);
+    return per ? { percentual: per.percentual, especial: per } : { percentual: descontoBase(lc), especial: null };
+  }
+  function lancamentoEspecial(l, chave) {
+    return periodosEspeciais(chave).some((per) => lancamentoNoPeriodo(l, per.inicio, per.fim));
+  }
+
+  // uso/faturamento por cupom dentro de De/Até, opcionalmente só nos
+  // períodos especiais ("50") ou só fora deles ("20")
+  function statsPorCupom(de, ate, faixa) {
+    const mapa = new Map();
+    for (const l of lancamentos) {
+      if (!lancamentoNoPeriodo(l, de, ate)) continue;
+      const chave = chavePorParceiroId[l.parceiroId];
+      if (!chave) continue;
+      if (faixa !== "todos" && lancamentoEspecial(l, chave) !== (faixa === "50")) continue;
+      if (!mapa.has(chave)) mapa.set(chave, { uso: 0, fat: 0 });
+      const a = mapa.get(chave);
+      a.uso += l.quantidadeUso;
+      a.fat += l.faturamentoCupom;
+    }
+    return mapa;
+  }
+
+  /* ---------- estado da tela ---------- */
+
+  let abaPrincipal = "todos"; // "todos" | "grupos"
+  let grupoSel = grupos[grupos.length - 1]?.id || null;
+  let faixa = "todos"; // "todos" | "50" | "20"
+  let de = "", ate = "";
   let busca = "";
   const ordem = { chave: "cupom", dir: "asc" };
-  const customPeriodo = { de: "", ate: "" };
 
   app.innerHTML = `
     <div class="page-head">
       <div>
         <h1 class="page-title">Cupons</h1>
-        <div class="page-sub">${linhasCupom.length} cupons · 20% padrão ou 50% no período especial de cada grupo</div>
-      </div>
-      <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center">
-        <div class="filter-row" id="periodo-cupons" style="margin-bottom:0">
-          <button class="chip" data-p="pre50" id="chip-pre50" title="Selecione um grupo pra usar este filtro" disabled>Pré 50%</button>
-          <button class="chip" data-p="periodo50" id="chip-periodo50" title="Selecione um grupo pra usar este filtro" disabled>Período 50%</button>
-          <button class="chip" data-p="pos50" id="chip-pos50" title="Selecione um grupo pra usar este filtro" disabled>Pós 50%</button>
-          <button class="chip active" data-p="total">Total</button>
-        </div>
-        <div class="field" style="margin-bottom:0"><label>De</label><input class="input" type="date" id="cupons-de" style="width:auto"></div>
-        <div class="field" style="margin-bottom:0"><label>Até</label><input class="input" type="date" id="cupons-ate" style="width:auto"></div>
+        <div class="page-sub">${linhasCupom.length} cupons · desconto base próprio de cada cupom, aumentado nos períodos dos grupos <span class="badge badge--amber" style="margin-left:6px">esboço</span></div>
       </div>
     </div>
 
-    <div class="filter-row" id="aba-grupos">
-      <button class="chip active" data-aba="todos">Todos</button>
-      ${grupos.map((g) => `<button class="chip" data-aba="${g.numero}">${esc(g.nome)}</button>`).join("")}
-      <button class="btn btn-ghost btn-sm edit-only" id="grp-novo">+ Novo grupo</button>
+    <div class="tabs" id="abas-cupons">
+      <button class="tab-btn active" data-aba="todos">Todos os cupons</button>
+      <button class="tab-btn" data-aba="grupos">Grupos</button>
     </div>
 
-    <div id="grupo-painel"></div>
-
-    <div class="toolbar" style="margin-bottom:14px">
-      <input class="input" id="busca-cupom" type="search" placeholder="Buscar por cupom…" style="flex:1;min-width:200px" />
-    </div>
-
-    <div class="chart-card" style="padding:0">
-      <table class="rank-table" id="tabela-cupons">
-        <thead>
-          <tr>
-            <th data-sort="cupom">Cupom</th>
-            <th data-sort="uso" class="num">Usos no período</th>
-            <th data-sort="fat" class="num">Faturamento no período</th>
-            <th>Desconto atual</th>
-            <th>Início – término do desconto</th>
-            <th>Grupo</th>
-          </tr>
-        </thead>
-        <tbody id="lista-cupons"></tbody>
-      </table>
-    </div>
-
+    <div id="conteudo-cupons"></div>
     <div class="viz-tooltip" id="viz-tip-cupons" role="tooltip"></div>
   `;
+  const conteudo = app.querySelector("#conteudo-cupons");
 
-  const painel = app.querySelector("#grupo-painel");
-  const lista = app.querySelector("#lista-cupons");
+  app.querySelector("#abas-cupons").addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-aba]");
+    if (!btn) return;
+    abaPrincipal = btn.dataset.aba;
+    app.querySelectorAll("#abas-cupons .tab-btn").forEach((b) => b.classList.toggle("active", b === btn));
+    desenhar();
+  });
 
-  function periodoAtual() {
-    if (periodo === "pre50") {
-      const g = aba !== "todos" ? porIdGrupo[aba] : null;
-      // "todo o período anterior" à data cadastrada — sem limite inicial,
-      // só até o dia anterior ao começo do 50%.
-      return g?.inicio ? ["", diaAnteriorISO(g.inicio)] : ["", ""];
-    }
-    if (periodo === "periodo50") {
-      const g = aba !== "todos" ? porIdGrupo[aba] : null;
-      return [g?.inicio || "", g?.fim || ""];
-    }
-    if (periodo === "pos50") {
-      const g = aba !== "todos" ? porIdGrupo[aba] : null;
-      // "todo o período depois" — sem limite final, só a partir do dia
-      // seguinte ao fim do 50%.
-      return g?.fim ? [diaSeguinteISO(g.fim), ""] : ["", ""];
-    }
-    if (periodo === "custom") return [customPeriodo.de, customPeriodo.ate];
-    return ["", ""]; // total
-  }
-  // os chips "Pré 50%"/"Período 50%"/"Pós 50%" só fazem sentido com um
-  // grupo específico selecionado (cada grupo tem seu próprio período de
-  // 50%) — desabilita em "Todos" e, se algum dos três estava ativo,
-  // volta pro filtro "Total".
-  function atualizarChipsGrupo() {
-    const habilitado = aba !== "todos";
-    ["#chip-pre50", "#chip-periodo50", "#chip-pos50"].forEach((sel) => {
-      const chip = app.querySelector(sel);
-      chip.disabled = !habilitado;
-      chip.title = habilitado ? "" : "Selecione um grupo pra usar este filtro";
-    });
-    if (!habilitado && (periodo === "pre50" || periodo === "periodo50" || periodo === "pos50")) {
-      periodo = "total";
-      app.querySelectorAll("#periodo-cupons .chip").forEach((c) => c.classList.toggle("active", c.dataset.p === "total"));
-    }
+  function desenhar() {
+    if (abaPrincipal === "todos") desenharTodos();
+    else desenharGrupos();
   }
 
-  // Painel do período de 50% do grupo — visual bem mais discreto que o
-  // de seleção de período no topo (texto simples + "editar"), pra não
-  // parecer mais um seletor de data igual ao De/Até. Só vira o form de
-  // edição (com os inputs de data de verdade) quando clicado.
-  function desenharPainel() {
-    if (aba === "todos") { painel.innerHTML = ""; return; }
-    desenharPainelView(porIdGrupo[aba]);
-  }
+  /* ================= Aba "Todos os cupons" ================= */
 
-  function exportarGrupo(g) {
-    const vigencia = g.inicio && g.fim ? `${formatDataBR(g.inicio)} – ${formatDataBR(g.fim)}` : "";
-    const cuponsDoGrupo = linhasCupom
-      .filter((lc) => String(lc.parceiros[0].grupoCupom || "") === aba)
-      .sort((a, b) => (a.cupom || "").localeCompare(b.cupom || "", "pt-BR"));
-    const linhasArquivo = [
-      ["Cupom", "Descrição", "Início – término"],
-      ...cuponsDoGrupo.map((lc) => [lc.cupom, DESCRICAO_EXPORT, vigencia]),
-    ];
-    baixarCSV(linhasArquivo, `cupons-${g.nome.toLowerCase().replace(/\s+/g, "-")}-${hojeISO()}.csv`);
-  }
+  function desenharTodos() {
+    conteudo.innerHTML = `
+      <div class="toolbar" style="margin-bottom:14px; gap:10px; flex-wrap:wrap; align-items:flex-end">
+        <div class="field" style="margin-bottom:0"><label>De</label><input class="input" type="date" id="cupons-de" value="${de}" style="width:auto"></div>
+        <div class="field" style="margin-bottom:0"><label>Até</label><input class="input" type="date" id="cupons-ate" value="${ate}" style="width:auto"></div>
+        <div class="filter-row" id="faixa-cupons" style="margin-bottom:0">
+          <button class="chip ${faixa === "todos" ? "active" : ""}" data-f="todos">Todos os dias</button>
+          <button class="chip ${faixa === "50" ? "active" : ""}" data-f="50" title="Soma só os lançamentos que caem em algum período especial (grupo) de cada cupom">Período 50%</button>
+          <button class="chip ${faixa === "20" ? "active" : ""}" data-f="20" title="Soma só os lançamentos fora de qualquer período especial — o cupom no desconto base">Período 20%</button>
+        </div>
+        <input class="input" id="busca-cupom" type="search" placeholder="Buscar por cupom…" value="${esc(busca)}" style="flex:1;min-width:180px" />
+      </div>
+      <div class="muted" id="resumo-faixa" style="font-size:12.5px; margin-bottom:10px"></div>
 
-  function desenharPainelView(g) {
-    const periodoTxt = g.inicio && g.fim ? `${formatDataBR(g.inicio)} – ${formatDataBR(g.fim)}` : "não definido";
-    painel.innerHTML = `
-      <div class="muted" style="font-size:12.5px; margin-bottom:14px; display:flex; align-items:center; gap:12px; flex-wrap:wrap">
-        <span>Período 50% — ${esc(g.nome)}: <strong style="color:var(--text)">${esc(periodoTxt)}</strong></span>
-        <button type="button" class="btn-link edit-only" id="grp-editar">editar</button>
-        <span style="margin-left:auto; display:flex; gap:16px">
-          <button type="button" class="btn-link" id="grp-exportar">exportar tabela</button>
-          <button type="button" class="btn-link btn-link-danger edit-only" id="grp-excluir">excluir grupo</button>
-        </span>
+      <div class="chart-card" style="padding:0">
+        <table class="rank-table" id="tabela-cupons">
+          <thead>
+            <tr>
+              <th data-sort="cupom">Cupom</th>
+              <th data-sort="uso" class="num">Usos no período</th>
+              <th data-sort="fat" class="num">Faturamento no período</th>
+              <th data-sort="desc">Desconto atual</th>
+              <th>Desconto base</th>
+              <th>Períodos especiais</th>
+            </tr>
+          </thead>
+          <tbody id="lista-cupons"></tbody>
+        </table>
       </div>
     `;
-    painel.querySelector("#grp-excluir").addEventListener("click", () => excluirGrupo(g));
-    painel.querySelector("#grp-exportar").addEventListener("click", () => exportarGrupo(g));
-    painel.querySelector("#grp-editar")?.addEventListener("click", () => desenharPainelEdicao(g));
-  }
 
-  function desenharPainelEdicao(g) {
-    painel.innerHTML = `
-      <div class="toolbar" style="margin-bottom:16px; gap:10px; flex-wrap:wrap">
-        <strong style="font-size:13.5px">Período desconto 50% — ${esc(g.nome)}:</strong>
-        <input class="input" type="date" id="grp-inicio" value="${g.inicio || ""}" style="width:auto">
-        <span class="muted">até</span>
-        <input class="input" type="date" id="grp-fim" value="${g.fim || ""}" style="width:auto">
-        <button class="btn btn-primary btn-sm" id="grp-salvar">Salvar</button>
-        <button class="btn btn-ghost btn-sm" id="grp-cancelar">Cancelar</button>
-      </div>
-    `;
-    painel.querySelector("#grp-cancelar").addEventListener("click", () => desenharPainelView(g));
-    painel.querySelector("#grp-salvar").addEventListener("click", async () => {
-      const campos = {
-        inicio: painel.querySelector("#grp-inicio").value,
-        fim: painel.querySelector("#grp-fim").value,
-      };
-      await store.updateGrupo(g.id, campos);
-      Object.assign(g, campos);
-      desenharPainelView(g);
-      desenharLista(); // o desconto atual de cada linha pode ter mudado
+    conteudo.querySelector("#cupons-de").addEventListener("change", (e) => { de = e.target.value; desenharLista(); });
+    conteudo.querySelector("#cupons-ate").addEventListener("change", (e) => { ate = e.target.value; desenharLista(); });
+    conteudo.querySelector("#faixa-cupons").addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-f]");
+      if (!btn) return;
+      faixa = btn.dataset.f;
+      conteudo.querySelectorAll("#faixa-cupons .chip").forEach((c) => c.classList.toggle("active", c === btn));
+      desenharLista();
     });
-  }
-
-  function linhasVisiveis() {
-    let stats;
-    if (periodo === "pre50" || periodo === "periodo50" || periodo === "pos50") {
-      const g = aba !== "todos" ? porIdGrupo[aba] : null;
-      stats = statsPorCupomBalde50(lancamentos, periodo, g, chavePorParceiroId);
-    } else {
-      const [de, ate] = periodoAtual();
-      stats = statsPorCupom(lancamentos, de, ate, chavePorParceiroId);
-    }
-    const termo = busca.trim().toLowerCase();
-
-    const arr = linhasCupom
-      .filter((lc) => (aba === "todos" || String(lc.parceiros[0].grupoCupom || "") === aba))
-      .filter((lc) => !termo || (lc.cupom || "").toLowerCase().includes(termo))
-      .map((lc) => ({ lc, uso: stats.get(lc.chave)?.uso || 0, fat: stats.get(lc.chave)?.fat || 0 }));
-
-    const mul = ordem.dir === "asc" ? 1 : -1;
-    const val = (l) => {
-      if (ordem.chave === "uso") return l.uso;
-      if (ordem.chave === "fat") return l.fat;
-      return (l.lc.cupom || "").toLowerCase();
-    };
-    return arr.sort((a, b) => {
-      const va = val(a), vb = val(b);
-      if (typeof va === "string") return va.localeCompare(vb, "pt-BR") * mul;
-      return (va - vb) * mul;
+    conteudo.querySelector("#busca-cupom").addEventListener("input", (e) => { busca = e.target.value; desenharLista(); });
+    conteudo.querySelector("#tabela-cupons thead").addEventListener("click", (e) => {
+      const th = e.target.closest("th[data-sort]");
+      if (!th) return;
+      if (ordem.chave === th.dataset.sort) ordem.dir = ordem.dir === "asc" ? "desc" : "asc";
+      else { ordem.chave = th.dataset.sort; ordem.dir = th.dataset.sort === "cupom" ? "asc" : "desc"; }
+      desenharLista();
     });
+
+    const lista = conteudo.querySelector("#lista-cupons");
+    lista.addEventListener("click", (e) => {
+      const nomeEl = e.target.closest(".cupom-nome-hover");
+      if (!nomeEl || !podeEditar) return;
+      const lc = linhasPorChave.get(nomeEl.dataset.chave);
+      if (lc) abrirCupomDoParceiro(lc.parceiros[0], lc.parceiros, grupos, listas);
+    });
+    lista.addEventListener("change", async (e) => {
+      const sel = e.target.closest(".cupom-base");
+      if (!sel) return;
+      const lc = linhasPorChave.get(sel.dataset.chave);
+      if (!lc) return;
+      const valor = Number(sel.value);
+      await Promise.all(lc.parceiros.map((p) => store.updateParceiro(p.id, { descontoBase: valor })));
+      lc.parceiros.forEach((p) => { p.descontoBase = valor; });
+      desenharLista();
+    });
+
+    desenharLista();
   }
 
   function desenharLista() {
-    const arr = linhasVisiveis();
+    const stats = statsPorCupom(de, ate, faixa);
+    const termo = busca.trim().toLowerCase();
+    const arr = linhasCupom
+      .filter((lc) => !termo || (lc.cupom || "").toLowerCase().includes(termo))
+      .map((lc) => ({ lc, uso: stats.get(lc.chave)?.uso || 0, fat: stats.get(lc.chave)?.fat || 0, desc: descontoHoje(lc).percentual }));
+
+    const mul = ordem.dir === "asc" ? 1 : -1;
+    arr.sort((a, b) => {
+      if (ordem.chave === "cupom") return (a.lc.cupom || "").localeCompare(b.lc.cupom || "", "pt-BR") * mul;
+      return (a[ordem.chave] - b[ordem.chave]) * mul;
+    });
+
+    const lista = conteudo.querySelector("#lista-cupons");
     lista.innerHTML = arr.length
       ? arr.map((l) => rowHtml(l.lc, l.uso, l.fat)).join("")
       : `<tr><td colspan="6" class="empty">Nenhum cupom encontrado.</td></tr>`;
 
-    app.querySelectorAll("#tabela-cupons th[data-sort]").forEach((th) => {
+    conteudo.querySelectorAll("#tabela-cupons th[data-sort]").forEach((th) => {
       th.classList.toggle("sort-active", th.dataset.sort === ordem.chave);
       th.dataset.sortDir = th.dataset.sort === ordem.chave ? ordem.dir : "";
     });
 
-    wireTooltipCupons();
+    const totUso = arr.reduce((s, l) => s + l.uso, 0);
+    const totFat = arr.reduce((s, l) => s + l.fat, 0);
+    const rotuloFaixa = faixa === "50" ? "só nos períodos especiais" : faixa === "20" ? "só fora dos períodos especiais" : "todos os dias";
+    const rotuloDatas = de || ate ? `${de ? formatDataBR(de) : "início"} a ${ate ? formatDataBR(ate) : "hoje"}` : "todo o histórico";
+    conteudo.querySelector("#resumo-faixa").textContent =
+      `${rotuloDatas} · ${rotuloFaixa} · ${totUso} usos · ${formatMoeda(totFat)}`;
+
+    wireTooltipCupons(lista);
   }
 
-  /* Ao passar o mouse (ou focar, via teclado) no nome do cupom, mostra
-     um mini menu com empresa + responsável de cada parceiro daquele
-     cupom — útil quando o cupom é compartilhado por mais de uma
-     empresa. Reaproveita o mesmo componente visual dos gráficos do
-     Dashboard (.viz-tooltip). */
-  function wireTooltipCupons() {
+  function rowHtml(lc, uso, fat) {
+    const rep = lc.parceiros[0];
+    const pausado = statusCupomEfetivo(rep) === "Pausado";
+    const hoje = descontoHoje(lc);
+    const base = descontoBase(lc);
+    const periodos = periodosEspeciais(lc.chave);
+    const empresas = lc.parceiros.map((p) => p.nome).join(", ");
+    const periodosHtml = periodos.length
+      ? periodos.map((p) => `<span class="badge ${p.inicio <= hojeISO() && hojeISO() <= p.fim ? "badge--amber" : "badge--gray"}" title="${esc(p.origem)} · ${p.percentual}%" style="margin:1px 3px 1px 0">${esc(fmtIntervaloCurto(p.inicio, p.fim))}</span>`).join("")
+      : `<span class="muted">—</span>`;
+    return `<tr class="rank-row">
+      <td>
+        <strong class="cupom-nome-hover${hoje.especial ? " cupom-codigo--50" : ""}${pausado ? " cupom-pausado" : ""}" data-chave="${esc(lc.chave)}" tabindex="0">${esc(lc.cupom)}</strong>
+        ${pausado ? `<span class="muted" style="font-size:11px"> · fora do ar</span>` : ""}
+        ${lc.parceiros.length > 1 ? `<div class="muted" style="font-size:11.5px">${esc(empresas)}</div>` : ""}
+      </td>
+      <td class="num">${uso}</td>
+      <td class="num">${esc(formatMoeda(fat))}</td>
+      <td>
+        <span class="badge ${hoje.especial ? "cupom-desconto--50" : "cupom-desconto--20"}">${hoje.percentual}%</span>
+        ${hoje.especial ? `<div class="muted" style="font-size:11px">${esc(hoje.especial.origem)} até ${esc(formatDataBR(hoje.especial.fim))}</div>` : ""}
+      </td>
+      <td>
+        <select class="input cupom-base" data-chave="${esc(lc.chave)}" style="width:80px" ${podeEditar ? "" : "disabled"}>
+          ${DESCONTOS_BASE.map((d) => `<option value="${d}" ${d === base ? "selected" : ""}>${d}%</option>`).join("")}
+        </select>
+      </td>
+      <td style="font-size:11.5px">${periodosHtml}</td>
+    </tr>`;
+  }
+
+  /* Ao passar o mouse no nome do cupom, mostra empresa + responsável de
+     cada parceiro daquele cupom (mesmo componente .viz-tooltip). */
+  function wireTooltipCupons(lista) {
     const tip = app.querySelector("#viz-tip-cupons");
     lista.querySelectorAll(".cupom-nome-hover").forEach((el) => {
       const lc = linhasPorChave.get(el.dataset.chave);
@@ -367,152 +328,168 @@ export async function renderCupons(app) {
     });
   }
 
-  function fmtPeriodo(per) {
-    return per.inicio && per.fim ? `${formatDataBR(per.inicio)} – ${formatDataBR(per.fim)}` : "—";
-  }
+  /* ================= Aba "Grupos" ================= */
 
-  function rowHtml(lc, uso, fat) {
-    const rep = lc.parceiros[0];
-    const pausado = statusCupomEfetivo(rep) === "Pausado";
-    const d = descontoAtual(rep, grupos);
-    const periodoTxt = fmtPeriodo(d);
-    const empresas = lc.parceiros.map((p) => p.nome).join(", ");
-    return `<tr class="rank-row">
-      <td>
-        <strong class="cupom-nome-hover${d.percentual === DESCONTO_ESPECIAL ? " cupom-codigo--50" : ""}${pausado ? " cupom-pausado" : ""}" data-chave="${esc(lc.chave)}" tabindex="0">${esc(lc.cupom)}</strong>
-        ${pausado ? `<span class="muted" style="font-size:11px"> · fora do ar</span>` : ""}
-        ${lc.parceiros.length > 1 ? `<div class="muted" style="font-size:11.5px">${esc(empresas)}</div>` : ""}
-      </td>
-      <td class="num">${uso}</td>
-      <td class="num">${esc(formatMoeda(fat))}</td>
-      <td>
-        <select class="input cupom-desconto ${d.percentual === DESCONTO_ESPECIAL ? "cupom-desconto--50" : "cupom-desconto--20"}" data-chave="${esc(lc.chave)}" style="width:80px">
-          <option value="20" ${d.percentual === DESCONTO_PADRAO ? "selected" : ""}>20%</option>
-          <option value="50" ${d.percentual === DESCONTO_ESPECIAL ? "selected" : ""}>50%</option>
-        </select>
-      </td>
-      <td class="muted cupom-periodo" style="font-size:12.5px">${esc(periodoTxt)}</td>
-      <td>
-        <select class="input cupom-grupo" data-chave="${esc(lc.chave)}" style="width:140px" ${podeEditar ? "" : "disabled"}>
-          <option value="">Sem grupo</option>
-          ${grupos.map((g) => `<option value="${g.numero}" ${String(rep.grupoCupom || "") === String(g.numero) ? "selected" : ""}>${esc(g.nome)}</option>`).join("")}
-        </select>
-      </td>
-    </tr>`;
-  }
-
-  atualizarChipsGrupo();
-  desenharPainel();
-  desenharLista();
-
-  app.querySelector("#periodo-cupons").addEventListener("click", (e) => {
-    const btn = e.target.closest("[data-p]");
-    if (!btn) return;
-    periodo = btn.dataset.p;
-    app.querySelectorAll("#periodo-cupons .chip").forEach((c) => c.classList.toggle("active", c === btn));
-    // mostra nos campos De/Até a data que o chip calculou (só exibição —
-    // continuam editáveis, e editar troca pro filtro personalizado).
-    const [de, ate] = periodoAtual();
-    app.querySelector("#cupons-de").value = de;
-    app.querySelector("#cupons-ate").value = ate;
-    desenharLista();
-  });
-
-  ["#cupons-de", "#cupons-ate"].forEach((sel) => {
-    app.querySelector(sel).addEventListener("change", () => {
-      customPeriodo.de = app.querySelector("#cupons-de").value;
-      customPeriodo.ate = app.querySelector("#cupons-ate").value;
-      periodo = "custom";
-      app.querySelectorAll("#periodo-cupons .chip").forEach((c) => c.classList.remove("active"));
-      desenharLista();
+  function desenharGrupos() {
+    if (!grupos.some((g) => g.id === grupoSel)) grupoSel = grupos[grupos.length - 1]?.id || null;
+    conteudo.innerHTML = `
+      <div class="filter-row" id="sub-grupos">
+        ${grupos.map((g) => `<button class="chip ${g.id === grupoSel ? "active" : ""}" data-g="${esc(g.id)}" title="${esc(fmtIntervalo(g.inicio, g.fim))}">${esc(g.nome)}</button>`).join("")}
+        <button class="btn btn-ghost btn-sm edit-only" id="grp-novo">+ Novo grupo</button>
+      </div>
+      <div id="grupo-detalhe"></div>
+    `;
+    conteudo.querySelector("#sub-grupos").addEventListener("click", (e) => {
+      if (e.target.closest("#grp-novo")) return abrirFormGrupo(null);
+      const btn = e.target.closest("[data-g]");
+      if (!btn) return;
+      grupoSel = btn.dataset.g;
+      desenharGrupos();
     });
-  });
+    const g = grupos.find((x) => x.id === grupoSel);
+    const det = conteudo.querySelector("#grupo-detalhe");
+    if (!g) { det.innerHTML = `<div class="empty">Nenhum grupo ainda.</div>`; return; }
 
-  app.querySelector("#aba-grupos").addEventListener("click", (e) => {
-    if (e.target.closest("#grp-novo")) return abrirNovoGrupo();
-    const btn = e.target.closest("[data-aba]");
-    if (!btn) return;
-    aba = btn.dataset.aba;
-    app.querySelectorAll("#aba-grupos .chip").forEach((c) => c.classList.toggle("active", c === btn));
-    atualizarChipsGrupo();
-    // se "Pré 50%"/"Período 50%"/"Pós 50%" continua (ou passou a ficar)
-    // ativo, os campos De/Até precisam refletir o período do grupo
-    // recém-selecionado.
-    if (periodo === "pre50" || periodo === "periodo50" || periodo === "pos50" || periodo === "total") {
-      const [de, ate] = periodoAtual();
-      app.querySelector("#cupons-de").value = de;
-      app.querySelector("#cupons-ate").value = ate;
-    }
-    desenharPainel();
-    desenharLista();
-  });
+    const membros = [...(membrosPorGrupo.get(g.id) || [])]
+      .map((ch) => linhasPorChave.get(ch))
+      .filter(Boolean)
+      .sort((a, b) => (a.cupom || "").localeCompare(b.cupom || "", "pt-BR"));
+    const stats = g.inicio && g.fim ? statsPorCupom(g.inicio, g.fim, "todos") : new Map();
+    const totUso = membros.reduce((s, lc) => s + (stats.get(lc.chave)?.uso || 0), 0);
+    const totFat = membros.reduce((s, lc) => s + (stats.get(lc.chave)?.fat || 0), 0);
+    const legado = !Array.isArray(g.cupons);
 
-  function abrirNovoGrupo() {
-    const proximoNumero = Math.max(0, ...grupos.map((g) => g.numero)) + 1;
+    det.innerHTML = `
+      <div class="chart-card" style="margin-bottom:14px">
+        <div style="display:flex; gap:24px; flex-wrap:wrap; align-items:center">
+          <div><div class="muted" style="font-size:12px">Período especial</div><strong>${esc(fmtIntervalo(g.inicio, g.fim))}</strong></div>
+          <div><div class="muted" style="font-size:12px">Desconto no período</div><strong>${g.percentual || PERCENTUAL_GRUPO_PADRAO}%</strong></div>
+          <div><div class="muted" style="font-size:12px">Cupons</div><strong>${membros.length}</strong></div>
+          <div><div class="muted" style="font-size:12px">No período</div><strong>${totUso} usos · ${esc(formatMoeda(totFat))}</strong></div>
+          <span style="margin-left:auto; display:flex; gap:16px">
+            <button type="button" class="btn-link edit-only" id="grp-editar">editar grupo</button>
+            <button type="button" class="btn-link edit-only" id="grp-membros">adicionar/remover cupons</button>
+            <button type="button" class="btn-link" id="grp-exportar">exportar tabela</button>
+            <button type="button" class="btn-link btn-link-danger edit-only" id="grp-excluir">excluir grupo</button>
+          </span>
+        </div>
+        ${legado ? `<div class="muted" style="font-size:11.5px; margin-top:8px">Membros lidos do campo antigo "Grupo" de cada cupom — ao editar os membros aqui, o grupo passa a guardar a própria lista.</div>` : ""}
+      </div>
+
+      <div class="chart-card" style="padding:0">
+        <table class="rank-table">
+          <thead>
+            <tr>
+              <th>Cupom</th>
+              <th class="num">Usos no período do grupo</th>
+              <th class="num">Faturamento no período do grupo</th>
+              <th>Desconto base</th>
+              <th>Outros períodos especiais</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${membros.length ? membros.map((lc) => {
+              const outros = periodosEspeciais(lc.chave).filter((p) => !(p.inicio === g.inicio && p.fim === g.fim && p.origem === g.nome));
+              return `<tr class="rank-row">
+                <td><strong>${esc(lc.cupom)}</strong>${lc.parceiros.length > 1 ? `<div class="muted" style="font-size:11.5px">${esc(lc.parceiros.map((p) => p.nome).join(", "))}</div>` : `<div class="muted" style="font-size:11.5px">${esc(lc.parceiros[0].nome)}</div>`}</td>
+                <td class="num">${stats.get(lc.chave)?.uso || 0}</td>
+                <td class="num">${esc(formatMoeda(stats.get(lc.chave)?.fat || 0))}</td>
+                <td>${descontoBase(lc)}%</td>
+                <td style="font-size:11.5px">${outros.length ? outros.map((p) => `<span class="badge badge--gray" title="${esc(p.origem)}" style="margin:1px 3px 1px 0">${esc(fmtIntervaloCurto(p.inicio, p.fim))}</span>`).join("") : `<span class="muted">—</span>`}</td>
+              </tr>`;
+            }).join("") : `<tr><td colspan="5" class="empty">Nenhum cupom neste grupo.</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    `;
+    det.querySelector("#grp-editar")?.addEventListener("click", () => abrirFormGrupo(g));
+    det.querySelector("#grp-membros")?.addEventListener("click", () => abrirMembros(g));
+    det.querySelector("#grp-exportar").addEventListener("click", () => {
+      const linhasArquivo = [
+        ["Cupom", "Descrição", "Início – término"],
+        ...membros.map((lc) => [lc.cupom, DESCRICAO_EXPORT, g.inicio && g.fim ? fmtIntervalo(g.inicio, g.fim) : ""]),
+      ];
+      baixarCSV(linhasArquivo, `cupons-${g.nome.toLowerCase().replace(/\s+/g, "-")}-${hojeISO()}.csv`);
+    });
+    det.querySelector("#grp-excluir")?.addEventListener("click", () => excluirGrupo(g));
+  }
+
+  function abrirFormGrupo(g) {
+    const novo = !g;
+    const proximoNumero = Math.max(0, ...grupos.map((x) => x.numero)) + 1;
     openModal({
-      title: "Novo grupo",
-      subtitle: "Cria um grupo com período de desconto especial próprio",
-      submitLabel: "Criar",
-      bodyHtml: fieldText("nome", "Nome do grupo", { required: true, value: `Grupo ${proximoNumero}` }),
+      title: novo ? "Novo grupo" : `Editar ${g.nome}`,
+      subtitle: "Período em que os cupons do grupo ganham desconto especial",
+      submitLabel: novo ? "Criar" : "Salvar",
+      bodyHtml: `
+        ${fieldText("nome", "Nome do grupo", { required: true, value: novo ? `Grupo ${proximoNumero}` : g.nome })}
+        <div class="field-2col">
+          ${fieldText("inicio", "Início", { type: "date", value: g?.inicio || "" })}
+          ${fieldText("fim", "Fim", { type: "date", value: g?.fim || "" })}
+        </div>
+        ${fieldSelect("percentual", "Desconto no período", DESCONTOS_BASE.map((d) => `${d}%`), { value: `${g?.percentual || PERCENTUAL_GRUPO_PADRAO}%` })}
+      `,
       onSubmit: async (form) => {
-        const nome = readValue(form, "nome");
-        if (!nome) throw new Error("Informe o nome do grupo.");
-        await store.addGrupo({ numero: proximoNumero, nome, inicio: "", fim: "" });
-        window.dispatchEvent(new CustomEvent("data-changed"));
+        const campos = {
+          nome: readValue(form, "nome"),
+          inicio: readValue(form, "inicio"),
+          fim: readValue(form, "fim"),
+          percentual: parseInt(readValue(form, "percentual"), 10) || PERCENTUAL_GRUPO_PADRAO,
+        };
+        if (!campos.nome) throw new Error("Informe o nome do grupo.");
+        if (campos.inicio && campos.fim && campos.fim < campos.inicio) throw new Error("O fim do período está antes do início.");
+        if (novo) {
+          const criado = await store.addGrupo({ numero: proximoNumero, ...campos, cupons: [] });
+          grupos.push(criado);
+          membrosPorGrupo.set(criado.id, new Set());
+          grupoSel = criado.id;
+        } else {
+          await store.updateGrupo(g.id, campos);
+          Object.assign(g, campos);
+        }
+        desenhar();
+      },
+    });
+  }
+
+  function abrirMembros(g) {
+    const atuais = membrosPorGrupo.get(g.id) || new Set();
+    const ordenados = [...linhasCupom].sort((a, b) => (a.cupom || "").localeCompare(b.cupom || "", "pt-BR"));
+    openModal({
+      title: `Cupons do ${g.nome}`,
+      subtitle: fmtIntervalo(g.inicio, g.fim),
+      submitLabel: "Salvar",
+      wide: true,
+      bodyHtml: `
+        <input class="input" type="search" id="membros-busca" placeholder="Filtrar cupons…" style="margin-bottom:10px">
+        <div id="membros-lista" style="display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:6px 14px; max-height:50vh; overflow:auto">
+          ${ordenados.map((lc) => `<label class="checkbox-inline" data-cupom="${esc((lc.cupom || "").toLowerCase())}"><input type="checkbox" name="membro" value="${esc(lc.chave)}" ${atuais.has(lc.chave) ? "checked" : ""}> ${esc(lc.cupom)}</label>`).join("")}
+        </div>
+      `,
+      onMount: (overlay) => {
+        overlay.querySelector("#membros-busca").addEventListener("input", (e) => {
+          const t = e.target.value.trim().toLowerCase();
+          overlay.querySelectorAll("#membros-lista [data-cupom]").forEach((el) => { el.style.display = !t || el.dataset.cupom.includes(t) ? "" : "none"; });
+        });
+      },
+      onSubmit: async (form) => {
+        const cupons = [...form.querySelectorAll('input[name="membro"]:checked')].map((el) => el.value);
+        await store.updateGrupo(g.id, { cupons });
+        g.cupons = cupons;
+        membrosPorGrupo.set(g.id, new Set(cupons));
+        desenhar();
       },
     });
   }
 
   async function excluirGrupo(g) {
-    if (!confirm(`Excluir "${g.nome}"?\n\nOs cupons vinculados a esse grupo voltam pra "Sem grupo".`)) return;
-    const afetados = parceiros.filter((p) => String(p.grupoCupom || "") === String(g.numero));
-    await Promise.all(afetados.map((p) => store.updateParceiro(p.id, { grupoCupom: "" })));
+    if (!confirm(`Excluir "${g.nome}"?\n\nOs cupons perdem esse período especial (o desconto base deles não muda).`)) return;
     await store.removeGrupo(g.id);
-    window.dispatchEvent(new CustomEvent("data-changed"));
+    grupos.splice(grupos.indexOf(g), 1);
+    membrosPorGrupo.delete(g.id);
+    grupoSel = null;
+    desenhar();
   }
 
-  app.querySelector("#busca-cupom").addEventListener("input", (e) => { busca = e.target.value; desenharLista(); });
-
-  app.querySelector("#tabela-cupons thead").addEventListener("click", (e) => {
-    const th = e.target.closest("th[data-sort]");
-    if (!th) return;
-    const chave = th.dataset.sort;
-    if (ordem.chave === chave) ordem.dir = ordem.dir === "asc" ? "desc" : "asc";
-    else { ordem.chave = chave; ordem.dir = "desc"; }
-    desenharLista();
-  });
-
-  lista.addEventListener("click", (e) => {
-    const nomeEl = e.target.closest(".cupom-nome-hover");
-    if (!nomeEl) return;
-    const lc = linhasPorChave.get(nomeEl.dataset.chave);
-    if (!lc || !podeEditar) return;
-    abrirCupomDoParceiro(lc.parceiros[0], lc.parceiros, grupos, listas);
-  });
-
-  lista.addEventListener("change", async (e) => {
-    const descSel = e.target.closest(".cupom-desconto");
-    if (descSel) {
-      const chave = descSel.dataset.chave;
-      const lc = linhasPorChave.get(chave);
-      if (!lc) return;
-      const percentual = Number(descSel.value);
-      const per = periodoParaPercentual(lc.parceiros[0], porIdGrupo, percentual);
-      const tr = descSel.closest("tr");
-      tr.querySelector(".cupom-periodo").textContent = fmtPeriodo(per);
-      descSel.classList.toggle("cupom-desconto--50", percentual === DESCONTO_ESPECIAL);
-      descSel.classList.toggle("cupom-desconto--20", percentual === DESCONTO_PADRAO);
-      return;
-    }
-    const grupoSel = e.target.closest(".cupom-grupo");
-    if (grupoSel) {
-      const chave = grupoSel.dataset.chave;
-      const lc = linhasPorChave.get(chave);
-      if (!lc) return;
-      const valor = grupoSel.value ? Number(grupoSel.value) : "";
-      await Promise.all(lc.parceiros.map((p) => store.updateParceiro(p.id, { grupoCupom: valor })));
-      lc.parceiros.forEach((p) => { p.grupoCupom = valor; });
-      if (aba !== "todos") desenharLista(); // some da aba do grupo antigo
-    }
-  });
+  desenhar();
 }
