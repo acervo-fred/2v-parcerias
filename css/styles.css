@@ -405,24 +405,32 @@ button { font: inherit; }
    gap:0 nos grids finos (pistas/cabeçalho/guias) pra as barras ficarem
    visualmente contínuas entre subcolunas de dias vizinhos — só a
    divisória de fim de mês desenha borda. */
+/* Coluna fixa (loja/responsável): 180px = 20px de respiro + 160px de
+   rótulo. O respiro fica DENTRO da coluna (padding-left nos rótulos), e
+   não como padding-left do .mapa-equipe — senão sobra uma faixa de 20px
+   à esquerda da coluna fixa por onde as barras aparecem ao rolar. Todo
+   pedaço da coluna (cabeçalho, nome da loja, cada sub-linha inteira,
+   aviso de vazio) tem fundo opaco e sticky, formando um bloco contínuo
+   que cobre barras/guias que passam por baixo.
+   Larguras em cqw (container query): 100cqw é SEMPRE a largura visível
+   do .mapa-equipe, não importa onde a variável é usada — % mudaria de
+   referência conforme o elemento. Assim as linhas de loja/cabeçalho
+   podem ter a largura do mapa inteiro (e a borda inferior vai até o
+   último mês) sem quebrar a conta das pistas. */
 .mapa-equipe {
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg);
-  padding: 20px; overflow-x: auto; position: relative; z-index: 0;
-  /* item de flex (cabeçalho/pistas): % resolve contra a content-box do
-     próprio .mapa-equipe, então só o rótulo (160px) precisa ser
-     descontado */
-  --w-flex: max(calc(100% - 160px), calc(var(--n-meses) * (100% - 160px) / var(--meses-visiveis)));
-  /* filho absoluto (guias/linha de hoje): % resolve contra a padding-box
-     (inclui os 40px de padding lateral), então descontamos rótulo+padding
-     pra chegar na MESMA largura de --w-flex */
-  --w-abs: max(calc(100% - 200px), calc(var(--n-meses) * (100% - 200px) / var(--meses-visiveis)));
+  padding: 20px 20px 20px 0; overflow-x: auto; position: relative; z-index: 0;
+  container-type: inline-size;
+  --w-col: 180px;
+  --w-flex: max(calc(100cqw - var(--w-col)), calc(var(--n-meses) * (100cqw - var(--w-col)) / var(--meses-visiveis)));
+  --w-abs: var(--w-flex);
 }
-.mapa-cabecalho { display: flex; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+.mapa-cabecalho { display: flex; width: calc(var(--w-col) + var(--w-flex)); border-bottom: 1px solid var(--border); }
 .mapa-cabecalho-label {
-  width: 160px; flex-shrink: 0;
+  width: var(--w-col); flex-shrink: 0;
   position: sticky; left: 0; z-index: 3; background: var(--surface);
 }
-.mapa-cabecalho-meses { flex-shrink: 0; width: var(--w-flex); display: grid; gap: 0; }
+.mapa-cabecalho-meses { flex-shrink: 0; width: var(--w-flex); display: grid; gap: 0; padding-bottom: 8px; box-sizing: border-box; }
 .mapa-mes { font-size: 11px; font-weight: 800; letter-spacing: 0.4px; text-transform: uppercase; color: var(--text-faint); text-align: center; }
 
 /* linha vertical fina e contínua dividindo as colunas de mês — UM grid
@@ -439,7 +447,7 @@ button { font: inherit; }
    o mês inteiro), mas só a divisória de FIM DE MÊS (classe --mes)
    desenha borda — as subdivisões internas do mês ficam sem linha, pra
    não poluir. */
-.mapa-col-guias { position: absolute; top: 0; bottom: 0; left: 180px; width: var(--w-abs); display: grid; gap: 0; pointer-events: none; z-index: -1; }
+.mapa-col-guias { position: absolute; top: 20px; bottom: 20px; left: var(--w-col); width: var(--w-abs); display: grid; gap: 0; pointer-events: none; z-index: -1; }
 .mapa-col-guia--mes { border-right: 1px solid var(--border); }
 .mapa-col-guia--mes:last-child { border-right: none; }
 
@@ -449,27 +457,34 @@ button { font: inherit; }
    js/views/equipe.js), não travado nas subcolunas. z-index acima do
    conteúdo pra sempre aparecer, mesmo sobre uma barra — mas abaixo da
    coluna fixa de loja/responsável, que precisa cobri-la ao rolar. */
-.mapa-linha-hoje { position: absolute; top: 0; bottom: 0; left: 180px; width: var(--w-abs); pointer-events: none; z-index: 2; }
+.mapa-linha-hoje { position: absolute; top: 20px; bottom: 20px; left: var(--w-col); width: var(--w-abs); pointer-events: none; z-index: 2; }
 .mapa-linha-hoje-marca { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--c-red-fg); }
 
-.mapa-loja { padding: 14px 0; border-bottom: 1px solid var(--border); }
+.mapa-loja { width: calc(var(--w-col) + var(--w-flex)); border-bottom: 1px solid var(--border); }
 .mapa-loja:last-of-type { border-bottom: none; }
 .mapa-loja-nome {
-  font-family: var(--font-display); font-size: 17px; color: var(--accent-dark); margin-bottom: 8px;
-  width: fit-content; position: sticky; left: 0; z-index: 1;
-}
-.mapa-loja--crm { margin-top: 4px; }
-.mapa-loja--crm .mapa-loja-nome { color: var(--c-violet-fg); }
-.mapa-vazio { font-size: 12.5px; padding: 4px 0 4px 160px; position: sticky; left: 0; z-index: 1; width: fit-content; }
-
-.mapa-sub-linha { display: flex; align-items: flex-start; margin-bottom: 6px; }
-.mapa-sub-linha:last-child { margin-bottom: 0; }
-.mapa-sub-nome {
-  width: 160px; flex-shrink: 0; font-size: 12.5px; font-weight: 700; color: var(--text-soft);
-  padding-top: 4px;
+  font-family: var(--font-display); font-size: 17px; color: var(--accent-dark);
+  width: var(--w-col); box-sizing: border-box; padding: 14px 8px 8px 20px;
   position: sticky; left: 0; z-index: 3; background: var(--surface);
 }
-.mapa-sub-pistas { flex-shrink: 0; width: var(--w-flex); }
+.mapa-loja--crm .mapa-loja-nome { color: var(--c-violet-fg); padding-top: 18px; }
+.mapa-vazio {
+  font-size: 12.5px; padding: 4px 0 14px calc(var(--w-col) + 20px); box-sizing: border-box;
+  position: sticky; left: 0; z-index: 3; width: fit-content;
+  background: linear-gradient(to right, var(--surface) var(--w-col), transparent var(--w-col));
+}
+
+/* sub-linha estica o rótulo até a altura de todas as pistas (stretch) e
+   o espaço entre sub-linhas é padding (não margin), pra a coluna fixa
+   não ter brecha nenhuma entre um responsável e outro */
+.mapa-sub-linha { display: flex; align-items: stretch; }
+.mapa-sub-nome {
+  width: var(--w-col); flex-shrink: 0; box-sizing: border-box; font-size: 12.5px; font-weight: 700; color: var(--text-soft);
+  padding: 4px 8px 0 20px;
+  position: sticky; left: 0; z-index: 3; background: var(--surface);
+}
+.mapa-sub-pistas { flex-shrink: 0; width: var(--w-flex); padding-bottom: 6px; }
+.mapa-sub-linha:last-child .mapa-sub-pistas { padding-bottom: 14px; }
 .mapa-pista { display: grid; gap: 0; margin-bottom: 4px; }
 .mapa-pista:last-child { margin-bottom: 0; }
 
@@ -483,6 +498,9 @@ button { font: inherit; }
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
 }
 .mapa-bar:hover { filter: brightness(0.95); }
+/* ação cujo prazo já passou: esmaecida, mas ainda clicável/legível no hover */
+.mapa-bar--passada { opacity: 0.4; }
+.mapa-bar--passada:hover { opacity: 0.75; }
 .mapa-bar--crm { background: var(--c-violet-bg); color: var(--c-violet-fg); cursor: default; font-weight: 700; text-align: center; }
 .mapa-bar--crm:hover { filter: none; }
 
@@ -969,3 +987,4 @@ body:not(.is-admin) .admin-only { display: none !important; }
 .pd-dia--sel { background: var(--accent-soft); color: var(--accent-dark); }
 .pd-dia--ponta { background: var(--accent); color: var(--accent-contrast); font-weight: 700; }
 .pd-dia--ponta:hover { background: var(--accent-dark); }
+.chart-nota-estimado { font-size: 11.5px; margin-top: 6px; }

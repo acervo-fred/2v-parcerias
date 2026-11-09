@@ -24,6 +24,12 @@ function avisarMudanca() {
 // mais tarde entre todas as tasks — tasks sem dataInicio usam o
 // próprio prazo como início (evento de "1 mês só", mesmo fallback já
 // usado no calendário de Próximos Passos).
+const MESES_A_FRENTE = 2;
+// data local de hoje (toISOString é UTC e já vira o dia às 21h no Rio)
+function hojeISO() {
+  const h = new Date();
+  return `${h.getFullYear()}-${String(h.getMonth() + 1).padStart(2, "0")}-${String(h.getDate()).padStart(2, "0")}`;
+}
 function mesesDoIntervalo(tasks) {
   let minIso = null, maxIso = null;
   for (const t of tasks) {
@@ -34,6 +40,16 @@ function mesesDoIntervalo(tasks) {
     if (!maxIso || fim > maxIso) maxIso = fim;
   }
   if (!minIso) return [];
+  // o mês atual (e os MESES_A_FRENTE seguintes) sempre entram no intervalo — o mapa abre posicionado em
+  // hoje (ver rolarParaHoje), então hoje precisa existir na régua
+  const h = new Date();
+  const hojeIso = hojeISO();
+  if (hojeIso < minIso) minIso = hojeIso;
+  // + MESES_A_FRENTE meses à frente de hoje, mesmo sem ação cadastrada,
+  // pra hoje não ficar colado na borda direita (espaço pra planejar)
+  const f = new Date(h.getFullYear(), h.getMonth() + MESES_A_FRENTE, 1);
+  const frenteIso = `${f.getFullYear()}-${String(f.getMonth() + 1).padStart(2, "0")}-01`;
+  if (frenteIso > maxIso) maxIso = frenteIso;
   const [anoIni, mesIni] = minIso.slice(0, 7).split("-").map(Number);
   const [anoFim, mesFim] = maxIso.slice(0, 7).split("-").map(Number);
   const meses = [];
@@ -104,6 +120,21 @@ function subColunaDeData(meses, iso) {
   return idxMes * SUBCOLS_POR_MES + sub;
 }
 
+// abre o mapa já rolado até hoje: a linha vermelha fica a ~1/4 da área
+// visível de meses (um pouco de passado à esquerda, o resto pra frente),
+// então a janela "anda" pra direita sozinha conforme os dias passam.
+// Meses mais antigos continuam acessíveis rolando pra esquerda.
+const POSICAO_HOJE_NA_TELA = 0.25;
+function rolarParaHoje(mapa) {
+  const marca = mapa.querySelector(".mapa-linha-hoje-marca");
+  if (!marca || mapa.scrollWidth <= mapa.clientWidth) return;
+  const rotulo = mapa.querySelector(".mapa-cabecalho-label");
+  const larguraRotulo = rotulo ? rotulo.getBoundingClientRect().width : 160;
+  const xMarca = marca.getBoundingClientRect().left - mapa.getBoundingClientRect().left + mapa.scrollLeft;
+  const areaVisivel = mapa.clientWidth - larguraRotulo;
+  mapa.scrollLeft = Math.max(0, xMarca - larguraRotulo - areaVisivel * POSICAO_HOJE_NA_TELA);
+}
+
 export async function renderEquipe(app) {
   const [lojas, tasks] = await Promise.all([
     store.listLojas(),
@@ -149,6 +180,8 @@ export async function renderEquipe(app) {
     ${crmBlocoHtml(meses)}
   `;
 
+  rolarParaHoje(mapa);
+
   mapa.addEventListener("click", (e) => {
     const bar = e.target.closest("[data-task-id]");
     if (!bar) return;
@@ -181,6 +214,8 @@ function lojaBlocoHtml(loja, tasksDaLoja, meses) {
 }
 
 function subLinhaHtml(responsavel, itens, meses) {
+  // ação que já terminou (prazo antes de hoje) fica esmaecida — ver .mapa-bar--passada
+  const hojeIso = hojeISO();
   const totalCols = meses.length * SUBCOLS_POR_MES;
   const posicionadas = itens
     .map((t) => {
@@ -211,7 +246,7 @@ function subLinhaHtml(responsavel, itens, meses) {
         ${finalPorPista.map((_, pistaIdx) => `
           <div class="mapa-pista" style="grid-template-columns:repeat(${totalCols},1fr)">
             ${comPista.filter((t) => t.pista === pistaIdx).map((t) => `
-              <div class="mapa-bar pp-bar--${corDe(responsavel)}${t.concluidaEm ? " acao-concluida" : ""}" style="grid-column:${t.idxIni + 1}/${t.idxFim + 2}" data-task-id="${esc(t.id)}" data-responsavel="${esc(responsavel)}" title="${esc(t.description)}${t.concluidaEm ? " (feita)" : ""}">${esc(t.description)}</div>
+              <div class="mapa-bar pp-bar--${corDe(responsavel)}${t.concluidaEm ? " acao-concluida" : ""}${t.dueDate < hojeIso ? " mapa-bar--passada" : ""}" style="grid-column:${t.idxIni + 1}/${t.idxFim + 2}" data-task-id="${esc(t.id)}" data-responsavel="${esc(responsavel)}" title="${esc(t.description)}${t.concluidaEm ? " (feita)" : ""}">${esc(t.description)}</div>
             `).join("")}
           </div>
         `).join("")}

@@ -289,3 +289,82 @@ export function lancamentoNoPeriodo(l, de, ate) {
   if (ate && inicio > ate) return false;
   return true;
 }
+
+/* ============================================================
+   Rateio de lançamentos longos (mais de 7 dias — na prática, os
+   lançamentos MENSAIS, como o histórico do Leblon de set/25 a jan/26).
+
+   Sem isso, um lançamento de mês inteiro caía todo na semana do seu
+   dia de início (gráficos por semana) e contava inteiro em qualquer
+   filtro que só encostasse nele (ex.: "semana passada"). Aqui os
+   números são distribuídos por igual por DIA do período — cada semana
+   (ou filtro) recebe a fração de dias que cai dentro dela. O total do
+   lançamento é preservado; o banco não é alterado (é só leitura).
+
+   Lançamentos de até 7 dias (dia, semana) continuam contando inteiros,
+   como sempre — rateá-los mudaria números que hoje são reais. Qualquer
+   pedaço rateado sai marcado `estimado: true`, pra tela avisar.
+   ============================================================ */
+export const DIAS_MAX_SEM_RATEIO = 7;
+const CAMPOS_RATEAVEIS = ["quantidadeUso", "faturamentoCupom", "faturamentoTotal", "faturamentoDelivery", "faturamentoSemCupom"];
+
+function diasNoIntervalo(inicio, fim) {
+  return Math.round((parseISO(fim) - parseISO(inicio)) / 86400000) + 1;
+}
+
+/* true quando o lançamento cobre mais de 7 dias e por isso é rateado. */
+export function lancamentoRateavel(l) {
+  if (!l.dataInicio) return false;
+  return diasNoIntervalo(l.dataInicio, l.dataFim || l.dataInicio) > DIAS_MAX_SEM_RATEIO;
+}
+
+function escalar(l, fracao, inicio, fim) {
+  const copia = { ...l, dataInicio: inicio, dataFim: fim, estimado: true };
+  for (const c of CAMPOS_RATEAVEIS) {
+    if (typeof l[c] === "number") copia[c] = l[c] * fracao;
+  }
+  return copia;
+}
+
+/* Pedaço de `l` que cai dentro de [de, ate] (qualquer um vazio = sem
+   limite daquele lado). Devolve null se não houver interseção; o próprio
+   `l` se ele não for rateável ou estiver inteiro dentro do filtro; ou
+   uma cópia com os números proporcionais aos dias de interseção. */
+export function fatiarLancamento(l, de, ate) {
+  if (!lancamentoNoPeriodo(l, de, ate)) return null;
+  if (!lancamentoRateavel(l)) return l;
+  const inicio = l.dataInicio, fim = l.dataFim || inicio;
+  const ini = de && de > inicio ? de : inicio;
+  const fi = ate && ate < fim ? ate : fim;
+  if (ini === inicio && fi === fim) return l;
+  return escalar(l, diasNoIntervalo(ini, fi) / diasNoIntervalo(inicio, fim), ini, fi);
+}
+
+/* Lista já filtrada por [de, ate], com os lançamentos longos rateados. */
+export function lancamentosNoPeriodoRateados(lista, de, ate) {
+  const out = [];
+  for (const l of lista) {
+    const p = fatiarLancamento(l, de, ate);
+    if (p) out.push(p);
+  }
+  return out;
+}
+
+/* Distribui `l` entre baldes de tempo (semana/mês): `chaveDe(iso)` dá a
+   chave do dia. Devolve [{ chave, lancamento }] — um item só (o próprio
+   `l`, na chave do início) se não for rateável, como era antes. */
+export function distribuirPorChave(l, chaveDe) {
+  if (!l.dataInicio) return [];
+  if (!lancamentoRateavel(l)) return [{ chave: chaveDe(l.dataInicio), lancamento: l }];
+  const inicio = l.dataInicio, fim = l.dataFim || inicio;
+  const total = diasNoIntervalo(inicio, fim);
+  const dias = new Map(); // chave → { n, ini, fim }
+  for (let d = inicio; d <= fim; d = diaSeguinte(d)) {
+    const k = chaveDe(d);
+    const atual = dias.get(k);
+    if (atual) { atual.n++; atual.fim = d; } else dias.set(k, { n: 1, ini: d, fim: d });
+  }
+  // cabe inteiro num balde só (ex.: lançamento mensal no gráfico por mês) → número real, não estimado
+  if (dias.size === 1) return [{ chave: dias.keys().next().value, lancamento: l }];
+  return [...dias.entries()].map(([chave, v]) => ({ chave, lancamento: escalar(l, v.n / total, v.ini, v.fim) }));
+}

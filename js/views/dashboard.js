@@ -25,7 +25,7 @@
 
 import { store } from "../data/store.js";
 import { esc, formatMoeda } from "../ui/dom.js";
-import { lancamentoNoPeriodo, dedupLancamentos, inicioSemanaISO, fimSemanaISO, chaveSemana, rotuloSemanaCurto, chaveMes, rotuloMesCurto } from "../util/periodo.js";
+import { lancamentoNoPeriodo, dedupLancamentos, inicioSemanaISO, fimSemanaISO, chaveSemana, rotuloSemanaCurto, chaveMes, rotuloMesCurto, lancamentosNoPeriodoRateados, distribuirPorChave } from "../util/periodo.js";
 import { agruparParceirosPorCupom, chaveCupom, cupomEm50, periodos50 } from "../util/cupom.js";
 
 const MES_NOMES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
@@ -526,8 +526,10 @@ function formatDataBRlocal(iso) {
   return `${d}/${m}/${y}`;
 }
 /* ---------- agregações ---------- */
+// lançamentos longos (mensais) entram só com a fração de dias que cai
+// dentro de [de, ate] — ver fatiarLancamento em js/util/periodo.js
 function filtrarPeriodo(lancamentos, de, ate) {
-  return lancamentos.filter((l) => lancamentoNoPeriodo(l, de, ate));
+  return lancamentosNoPeriodoRateados(lancamentos, de, ate);
 }
 // agrega lançamentos pelo código de cupom (consolidado) em vez de por
 // parceiro individual — cupons compartilhados por mais de uma empresa
@@ -597,7 +599,7 @@ function desenharResumo(app, doPeriodo, doPeriodoAnterior, comparavel, kpisDesco
   ].join("");
 
   app.querySelector("#resumo-desconto").innerHTML = [
-    stat(atual.totalUso, "Usos de cupom", d(atual.totalUso, anterior.totalUso)),
+    stat(Math.round(atual.totalUso), "Usos de cupom", d(atual.totalUso, anterior.totalUso)),
     stat(kpisDesconto.novos === null ? "—" : kpisDesconto.novos, "Novos cupons utilizados no período", undefined, "novos"),
     stat(kpisDesconto.cupons50, "Cupons usados a 50%", undefined, "50"),
     stat(kpisDesconto.cupons20, "Cupons usados a 20%", undefined, "20"),
@@ -622,7 +624,7 @@ function wireStatTooltips(app, detalhesPorId) {
       } else {
         detalhes.forEach((d) => {
           const linha = document.createElement("div");
-          linha.textContent = `${d.cupom}: ${d.uso} uso${d.uso === 1 ? "" : "s"}`;
+          linha.textContent = `${d.cupom}: ${Math.round(d.uso)} uso${Math.round(d.uso) === 1 ? "" : "s"}`;
           tip.appendChild(linha);
         });
       }
@@ -700,7 +702,7 @@ function desenharRanking(app, doPeriodo, chavePorParceiroId, porChave, grupos) {
   }
   const max = Math.max(...linhas.map((l) => l.fat));
   container.innerHTML = linhas.map((l) => `
-    <div class="viz-bar-row" data-id="${esc(l.linha.parceiros[0].id)}" tabindex="0" role="img" aria-label="${esc(l.linha.cupom)}: ${esc(formatMoeda(l.fat))}, ${l.uso} usos">
+    <div class="viz-bar-row" data-id="${esc(l.linha.parceiros[0].id)}" tabindex="0" role="img" aria-label="${esc(l.linha.cupom)}: ${esc(formatMoeda(l.fat))}, ${Math.round(l.uso)} usos">
       <div class="viz-bar-label${labelClass50(l.linha, grupos)}" title="${esc(l.linha.cupom)} — ${esc(l.linha.parceiros.map((p) => p.nome).join(", "))}">${esc(l.linha.cupom)}</div>
       <div class="viz-bar-track"><div class="viz-bar-fill" style="width:${Math.max(2, Math.round((l.fat / max) * 100))}%"></div></div>
       <div class="viz-bar-val">${esc(formatMoeda(l.fat))}</div>
@@ -725,10 +727,10 @@ function desenharRankingUsos(app, doPeriodo, chavePorParceiroId, porChave, grupo
   }
   const max = Math.max(...linhas.map((l) => l.uso));
   container.innerHTML = linhas.map((l) => `
-    <div class="viz-bar-row" data-id="${esc(l.linha.parceiros[0].id)}" tabindex="0" role="img" aria-label="${esc(l.linha.cupom)}: ${l.uso} usos">
+    <div class="viz-bar-row" data-id="${esc(l.linha.parceiros[0].id)}" tabindex="0" role="img" aria-label="${esc(l.linha.cupom)}: ${Math.round(l.uso)} usos">
       <div class="viz-bar-label${labelClass50(l.linha, grupos)}" title="${esc(l.linha.cupom)} — ${esc(l.linha.parceiros.map((p) => p.nome).join(", "))}">${esc(l.linha.cupom)}</div>
       <div class="viz-bar-track"><div class="viz-bar-fill" style="width:${Math.max(2, Math.round((l.uso / max) * 100))}%"></div></div>
-      <div class="viz-bar-val">${l.uso}</div>
+      <div class="viz-bar-val">${Math.round(l.uso)}</div>
     </div>
   `).join("");
   wireBarDrillDown(container);
@@ -976,7 +978,7 @@ function tabelaRowHtml(l, grupos) {
   return `<tr class="rank-row" data-id="${esc(l.linha.parceiros[0].id)}" tabindex="0">
     <td${labelClass50(l.linha, grupos) ? ' class="cupom-codigo--50"' : ""}>${esc(l.linha.cupom)}</td>
     <td>${esc(l.nomes)}</td>
-    <td class="num">${l.uso}</td>
+    <td class="num">${Math.round(l.uso)}</td>
     <td class="num">${esc(formatMoeda(l.fat))}</td>
     <td class="num">${l.pct.toFixed(1)}%</td>
     <td class="num">${esc(formatMoeda(l.ticket))}</td>
@@ -1025,18 +1027,28 @@ function wireControlesGraficoCupom(app, prefixo, estado, redesenhar) {
    conforme o estado de granularidade. ---------- */
 function desenharGraficoCupons(app, opts) {
   const { containerId, tabelaBodyId, lancamentosTotais, porId, porIdGrupo, campo, estado, formatValue, formatAxis } = opts;
-  const filtrados = filtrarPorTier(lancamentosTotais, porId, porIdGrupo, estado.tier);
   const [de, ate] = limitesEfetivos(lancamentosTotais, "", "");
+  const chaveDe = estado.granularidade === "mes" ? chaveMes : chaveSemana;
+
+  // lançamentos longos (mensais) são rateados por dia entre as semanas
+  // que cobrem; o filtro de desconto roda DEPOIS, em cada pedaço, pra
+  // um período de 50% pegar só as semanas dentro dele
+  const pedacos = [];
+  for (const l of lancamentosTotais) {
+    for (const { chave, lancamento } of distribuirPorChave(l, chaveDe)) pedacos.push({ chave, l: lancamento });
+  }
+  const filtradosSet = new Set(filtrarPorTier(pedacos.map((p) => p.l), porId, porIdGrupo, estado.tier));
 
   const porChaveTempo = new Map();
-  for (const l of filtrados) {
-    if (!l.dataInicio) continue;
-    const chave = estado.granularidade === "mes" ? chaveMes(l.dataInicio) : chaveSemana(l.dataInicio);
+  const chavesEstimadas = new Set();
+  for (const { chave, l } of pedacos) {
+    if (!filtradosSet.has(l)) continue;
     porChaveTempo.set(chave, (porChaveTempo.get(chave) || 0) + l[campo]);
+    if (l.estimado) chavesEstimadas.add(chave);
   }
   const chaves = estado.granularidade === "mes" ? mesesNoPeriodo(de, ate) : semanasNoPeriodo(de, ate);
   const rotulo = estado.granularidade === "mes" ? rotuloMesCurto : rotuloSemanaCurto;
-  const pontos = chaves.map((c) => ({ label: rotulo(c), value: porChaveTempo.get(c) || 0 }));
+  const pontos = chaves.map((c) => ({ label: rotulo(c), value: porChaveTempo.get(c) || 0, estimado: chavesEstimadas.has(c) }));
 
   const container = app.querySelector(`#${containerId}`);
   const tabelaBody = tabelaBodyId ? app.querySelector(`#${tabelaBodyId}`) : null;
@@ -1047,7 +1059,9 @@ function desenharGraficoCupons(app, opts) {
     return;
   }
 
-  container.innerHTML = lineChartSVG(pontos, formatValue, formatAxis);
+  const temEstimado = pontos.some((p) => p.estimado);
+  container.innerHTML = lineChartSVG(pontos, formatValue, formatAxis)
+    + (temEstimado ? `<div class="muted chart-nota-estimado">Trecho tracejado: valores estimados — lançamentos mensais divididos pelos dias de cada semana.</div>` : "");
   wireLineChartHover(container, pontos, formatValue);
 
   if (tabelaBody) {
@@ -1057,7 +1071,7 @@ function desenharGraficoCupons(app, opts) {
       const tdLabel = document.createElement("td");
       tdLabel.textContent = p.label;
       const tdValor = document.createElement("td");
-      tdValor.textContent = formatValue(p.value);
+      tdValor.textContent = formatValue(p.value) + (p.estimado ? " (estimado)" : "");
       tr.append(tdLabel, tdValor);
       tabelaBody.appendChild(tr);
     });
@@ -1094,8 +1108,17 @@ function lineChartSVG(pontos, formatValue, formatAxis = formatCompact) {
   const linePath = pontos.map((p, i) => `${i === 0 ? "M" : "L"} ${x(i).toFixed(1)} ${y(p.value).toFixed(1)}`).join(" ");
   const areaPath = `${linePath} L ${x(n - 1).toFixed(1)} ${(padT + plotH).toFixed(1)} L ${x(0).toFixed(1)} ${(padT + plotH).toFixed(1)} Z`;
 
-  const dots = pontos.map((p, i) =>
-    `<circle cx="${x(i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="4" fill="var(--chart-series-a)" stroke="var(--surface)" stroke-width="2"/>`
+  // trecho estimado (ponto rateado de lançamento mensal) vira tracejado
+  // por cima da linha base, e o ponto fica vazado
+  const segmentosEstimados = pontos.slice(1).map((p, j) => {
+    const a = pontos[j];
+    if (!a.estimado && !p.estimado) return "";
+    return `M ${x(j).toFixed(1)} ${y(a.value).toFixed(1)} L ${x(j + 1).toFixed(1)} ${y(p.value).toFixed(1)}`;
+  }).filter(Boolean).join(" ");
+
+  const dots = pontos.map((p, i) => p.estimado
+    ? `<circle cx="${x(i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="3.5" fill="var(--surface)" stroke="var(--chart-series-a)" stroke-width="2"/>`
+    : `<circle cx="${x(i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="4" fill="var(--chart-series-a)" stroke="var(--surface)" stroke-width="2"/>`
   ).join("");
 
   const xLabels = pontos.map((p, i) =>
@@ -1110,13 +1133,14 @@ function lineChartSVG(pontos, formatValue, formatAxis = formatCompact) {
     const cx = x(i);
     const left = n === 1 ? padL : Math.max(padL, cx - colW / 2);
     const width = n === 1 ? plotW : colW;
-    return `<rect data-idx="${i}" data-cx="${cx.toFixed(1)}" x="${left.toFixed(1)}" y="${padT}" width="${width.toFixed(1)}" height="${plotH}" fill="transparent" tabindex="0" role="img" aria-label="${esc(p.label)}: ${esc(formatValue(p.value))}"/>`;
+    return `<rect data-idx="${i}" data-cx="${cx.toFixed(1)}" x="${left.toFixed(1)}" y="${padT}" width="${width.toFixed(1)}" height="${plotH}" fill="transparent" tabindex="0" role="img" aria-label="${esc(p.label)}: ${esc(formatValue(p.value))}${p.estimado ? " (estimado)" : ""}"/>`;
   }).join("");
 
   return `<svg viewBox="0 0 ${W} ${H}" class="viz-svg" preserveAspectRatio="xMidYMid meet">
     ${gridLines}
     <path d="${areaPath}" fill="var(--chart-series-a)" opacity="0.10" stroke="none"/>
     <path d="${linePath}" fill="none" stroke="var(--chart-series-a)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    ${segmentosEstimados ? `<path d="${segmentosEstimados}" fill="none" stroke="var(--surface)" stroke-width="2.5" stroke-dasharray="4 4"/>` : ""}
     ${dots}
     ${xLabels}
     ${lastLabel}
@@ -1146,6 +1170,12 @@ function wireLineChartHover(container, pontos, formatValue) {
       const span = document.createElement("span");
       span.textContent = p.label;
       tip.append(strong, br, span);
+      if (p.estimado) {
+        const nota = document.createElement("div");
+        nota.style.cssText = "font-size:11px;opacity:.8;margin-top:2px";
+        nota.textContent = "Estimado (lançamento mensal dividido por dia)";
+        tip.append(nota);
+      }
       const r = rect.getBoundingClientRect();
       tip.style.left = `${r.left + r.width / 2}px`;
       tip.style.top = `${r.top}px`;
@@ -1176,23 +1206,22 @@ function compareColHtml(id, cupons, de, ate) {
 }
 
 function calcularAgregado(lancamentos, chavePorParceiroId, cupomChave, de, ate) {
-  const filtrado = lancamentos.filter((l) => chavePorParceiroId[l.parceiroId] === cupomChave && lancamentoNoPeriodo(l, de, ate));
+  const filtrado = lancamentosNoPeriodoRateados(lancamentos.filter((l) => chavePorParceiroId[l.parceiroId] === cupomChave), de, ate);
   const uso = filtrado.reduce((s, l) => s + l.quantidadeUso, 0);
   const fat = filtrado.reduce((s, l) => s + l.faturamentoCupom, 0);
   return { uso, fat, ticket: uso > 0 ? fat / uso : 0 };
 }
 function totalCupomNoPeriodo(lancamentos, de, ate) {
-  return lancamentos
-    .filter((l) => lancamentoNoPeriodo(l, de, ate))
+  return lancamentosNoPeriodoRateados(lancamentos, de, ate)
     .reduce((s, l) => s + l.faturamentoCupom, 0);
 }
 function serieMensal(lancamentos, chavePorParceiroId, cupomChave, de, ate) {
-  const filtrado = lancamentos.filter((l) => chavePorParceiroId[l.parceiroId] === cupomChave && lancamentoNoPeriodo(l, de, ate));
+  const filtrado = lancamentosNoPeriodoRateados(lancamentos.filter((l) => chavePorParceiroId[l.parceiroId] === cupomChave), de, ate);
   const mapa = new Map();
-  for (const l of filtrado) {
-    const mes = (l.dataInicio || "").slice(0, 7);
-    if (!mes) continue;
-    mapa.set(mes, (mapa.get(mes) || 0) + l.faturamentoCupom);
+  for (const l0 of filtrado) {
+    for (const { chave: mes, lancamento: l } of distribuirPorChave(l0, chaveMes)) {
+      mapa.set(mes, (mapa.get(mes) || 0) + l.faturamentoCupom);
+    }
   }
   return mapa;
 }
@@ -1232,7 +1261,7 @@ function compararEDesenhar(app, lancamentos, chavePorParceiroId, porChave) {
       <span class="viz-legend-item"><i style="background:var(--chart-series-a)"></i>${esc(nomeA)}</span>
       <span class="viz-legend-item"><i style="background:var(--chart-series-b)"></i>${esc(nomeB)}</span>
     </div>
-    ${cmpMetricHtml("Usos de cupom", a.uso, b.uso, maxUso, (v) => String(v))}
+    ${cmpMetricHtml("Usos de cupom", a.uso, b.uso, maxUso, (v) => String(Math.round(v)))}
     ${cmpMetricHtml("Faturamento", a.fat, b.fat, maxFat, formatMoeda)}
     ${cmpMetricHtml("Participação no faturamento do período", pctA, pctB, maxPct, (v) => `${v.toFixed(1)}%`)}
     <div class="viz-cmp-metric">

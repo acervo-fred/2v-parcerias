@@ -13,7 +13,7 @@ import { store } from "../data/store.js";
 import { esc, formatMoeda } from "../ui/dom.js";
 import { corDoValor } from "../ui/badges.js";
 import { statusCupomEfetivo, agruparParceirosPorCupom, chaveCupom } from "../util/cupom.js";
-import { dedupLancamentos, lancamentoNoPeriodo } from "../util/periodo.js";
+import { dedupLancamentos, lancamentoNoPeriodo, lancamentosNoPeriodoRateados } from "../util/periodo.js";
 import { openModal } from "../ui/modal.js";
 
 const DIAS_VENCENDO = 30;
@@ -76,7 +76,7 @@ function kpisHtml(parceiros, fechados, lancamentos) {
   const cuponsVencendo = cuponsComData.filter((p) => p.dataVencimento >= hoje && p.dataVencimento <= limiteVencendo);
 
   const ha12Meses = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
-  const lancamentos12m = lancamentos.filter((l) => lancamentoNoPeriodo(l, ha12Meses, hoje));
+  const lancamentos12m = lancamentosNoPeriodoRateados(lancamentos, ha12Meses, hoje);
   const faturamento12m = lancamentos12m.reduce((s, l) => s + l.faturamentoCupom, 0);
 
   return [
