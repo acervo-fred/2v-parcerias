@@ -65,15 +65,19 @@ export async function renderDashboard(app) {
   // recarregar (trocar De/Até no topo não reseta a escolha manual)
   let diasPerdidosManual = null;
 
-  const [deInicial, ateInicial] = presetRange("mes");
+  // navegação de período do topo: deslocamento a partir de hoje
+  // (semana: 0 = esta, -1 = passada; mês: 0 = este, -1 = passado).
+  // Default da página = semana passada (a última fechada/lançada).
+  const navPeriodo = { ativo: "semana", semana: -1, mes: 0 };
+  const [deInicial, ateInicial] = rangeNavegacao("semana", navPeriodo.semana);
 
   // estado da tabela de ranking (sobrevive a trocas de filtro/período)
   const tabelaState = { sortKey: "fat", sortDir: "desc", busca: "" };
   let linhasRanking = []; // recalculada a cada atualizarPeriodo()
   // estado dos dois gráficos "por cupom" (1.3/1.4) — cada um com seu
   // próprio filtro de desconto e granularidade, independentes
-  const graficoFatState = { tier: "ambos", granularidade: "semana" };
-  const graficoUsoState = { tier: "ambos", granularidade: "semana" };
+  const graficoFatState = { tier: "ambos", granularidade: "semana", zoom: 0 };
+  const graficoUsoState = { tier: "ambos", granularidade: "semana", zoom: 0 };
 
   app.innerHTML = `
     <div class="page-head">
@@ -82,10 +86,10 @@ export async function renderDashboard(app) {
 
     <div class="filter-row" id="presets" style="margin-bottom:14px; align-items:flex-end">
       <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center">
-        ${["semana", "semanapassada", "mes", "mespassado", "tudo"].map((p) =>
-          `<button class="chip ${p === "mes" ? "active" : ""}" data-preset="${p}">${presetLabel(p)}</button>`
-        ).join("")}
-        <select class="input select-compact" id="f-tipo" style="width:auto">
+        ${navPeriodoHtml("semana")}
+        ${navPeriodoHtml("mes")}
+        <button class="chip" data-preset="tudo">Tudo</button>
+        <select class="input select-compact" id="f-tipo" style="width:auto; max-width:190px" title="Segmento">
           ${tiposFiltro.map((t) => `<option value="${esc(t)}">${esc(t)}</option>`).join("")}
         </select>
       </div>
@@ -110,7 +114,10 @@ export async function renderDashboard(app) {
         <div class="chart-card">
           <div class="chart-card-head">
             <h3>Faturamento com cupons <span class="muted" style="font-size:11px;font-weight:600">— histórico completo</span></h3>
-            <button class="chart-toggle" id="toggle-mes" type="button">Ver tabela</button>
+            <div class="chart-head-acoes">
+              ${zoomGraficoHtml("fat")}
+              <button class="chart-toggle" id="toggle-mes" type="button">Ver tabela</button>
+            </div>
           </div>
           ${controlesGraficoCupomHtml("fat")}
           <div id="chart-mes"></div>
@@ -128,7 +135,10 @@ export async function renderDashboard(app) {
 
       <div class="dash-cols" style="display:grid;grid-template-columns:1.6fr 1fr;gap:20px;margin-bottom:20px;align-items:start">
         <div class="chart-card">
-          <h3>Uso de Cupons <span class="muted" style="font-size:11px;font-weight:600">— histórico completo</span></h3>
+          <div class="chart-card-head">
+            <h3>Uso de Cupons <span class="muted" style="font-size:11px;font-weight:600">— histórico completo</span></h3>
+            <div class="chart-head-acoes">${zoomGraficoHtml("uso")}</div>
+          </div>
           ${controlesGraficoCupomHtml("uso")}
           <div id="chart-uso"></div>
         </div>
@@ -244,12 +254,12 @@ export async function renderDashboard(app) {
     // (ver desenharGraficoCupons) — só reagem aos próprios toggles de
     // desconto (20%/50%/Ambos) e granularidade (Semana/Mês).
     desenharGraficoCupons(app, {
-      containerId: "chart-uso", tabelaBodyId: null,
+      containerId: "chart-uso", zoomId: "uso", tabelaBodyId: null,
       lancamentosTotais: lancamentosTipo, porId, porIdGrupo, campo: "quantidadeUso",
       estado: graficoUsoState, formatValue: (v) => `${Math.round(v)} usos`, formatAxis: formatCompactNumero,
     });
     desenharGraficoCupons(app, {
-      containerId: "chart-mes", tabelaBodyId: "tabela-mes-body",
+      containerId: "chart-mes", zoomId: "fat", tabelaBodyId: "tabela-mes-body",
       lancamentosTotais: lancamentosTipo, porId, porIdGrupo, campo: "faturamentoCupom",
       estado: graficoFatState, formatValue: formatMoeda, formatAxis: formatCompact,
     });
@@ -298,14 +308,41 @@ export async function renderDashboard(app) {
     atualizarPeriodo();
   });
 
-  app.querySelector("#presets").addEventListener("click", (e) => {
-    const btn = e.target.closest("[data-preset]");
-    if (!btn) return;
-    app.querySelectorAll("[data-preset]").forEach((b) => b.classList.toggle("active", b === btn));
-    const [de, ate] = presetRange(btn.dataset.preset);
+  // marca o seletor ativo e reescreve os rótulos dos navegadores
+  function sincronizarNavPeriodo() {
+    for (const tipo of ["semana", "mes"]) {
+      const nav = app.querySelector(`[data-nav-periodo="${tipo}"]`);
+      nav.classList.toggle("active", navPeriodo.ativo === tipo);
+      const [de, ate] = rangeNavegacao(tipo, navPeriodo[tipo]);
+      nav.querySelector("[data-nav-rotulo]").textContent = rotuloNavegacao(tipo, navPeriodo[tipo]);
+      nav.querySelector("[data-nav-datas]").textContent = tipo === "semana" ? `${dataCurta(de)} – ${dataCurta(ate)}` : "";
+      nav.querySelector('[data-nav="1"]').disabled = navPeriodo[tipo] >= 0; // não navega pro futuro
+    }
+    app.querySelector('[data-preset="tudo"]').classList.toggle("active", navPeriodo.ativo === "tudo");
+  }
+  function aplicarNavPeriodo() {
+    const [de, ate] = navPeriodo.ativo === "tudo" ? ["", ""] : rangeNavegacao(navPeriodo.ativo, navPeriodo[navPeriodo.ativo]);
     app.querySelector("#f-de").value = de;
     app.querySelector("#f-ate").value = ate;
+    sincronizarNavPeriodo();
     atualizarPeriodo();
+  }
+  sincronizarNavPeriodo();
+  app.querySelector("#presets").addEventListener("click", (e) => {
+    if (e.target.closest('[data-preset="tudo"]')) {
+      navPeriodo.ativo = "tudo";
+      return aplicarNavPeriodo();
+    }
+    const nav = e.target.closest("[data-nav-periodo]");
+    if (!nav) return;
+    const tipo = nav.dataset.navPeriodo;
+    const seta = e.target.closest("[data-nav]");
+    if (seta?.disabled) return;
+    // seta só desloca quando o seletor já está ativo; senão o 1º clique
+    // ativa no período mostrado no rótulo
+    if (seta && navPeriodo.ativo === tipo) navPeriodo[tipo] = Math.min(0, navPeriodo[tipo] + Number(seta.dataset.nav));
+    navPeriodo.ativo = tipo;
+    aplicarNavPeriodo();
   });
   app.querySelector("#f-tipo").addEventListener("change", (e) => {
     filtroTipo = e.target.value;
@@ -313,7 +350,8 @@ export async function renderDashboard(app) {
   });
   ["#f-de", "#f-ate"].forEach((sel) => {
     app.querySelector(sel).addEventListener("change", () => {
-      app.querySelectorAll("[data-preset]").forEach((b) => b.classList.remove("active"));
+      navPeriodo.ativo = null; // período personalizado
+      sincronizarNavPeriodo();
       atualizarPeriodo();
     });
   });
@@ -372,27 +410,43 @@ export async function renderDashboard(app) {
   });
 }
 
-/* ---------- período: presets ---------- */
-function presetLabel(p) {
-  return { semana: "Esta semana", semanapassada: "Semana passada", mes: "Este mês", mespassado: "Mês passado", tudo: "Tudo" }[p] || p;
+/* ---------- período: navegadores "< Semana passada >" / "< Este mês >" ---------- */
+const MESES_LONGOS = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+function navPeriodoHtml(tipo) {
+  const nome = tipo === "semana" ? "semana" : "mês";
+  return `<div class="nav-periodo" data-nav-periodo="${tipo}">
+    <button type="button" class="nav-periodo-seta" data-nav="-1" title="${tipo === "semana" ? "Semana anterior" : "Mês anterior"}" aria-label="${nome} anterior">‹</button>
+    <button type="button" class="nav-periodo-rotulo"><span data-nav-rotulo></span><span class="nav-periodo-datas" data-nav-datas></span></button>
+    <button type="button" class="nav-periodo-seta" data-nav="1" title="${tipo === "semana" ? "Semana seguinte" : "Mês seguinte"}" aria-label="${nome} seguinte">›</button>
+  </div>`;
 }
-function presetRange(nome) {
+function rangeNavegacao(tipo, offset) {
   const hoje = new Date();
-  const iso = (d) => d.toISOString().slice(0, 10);
-  if (nome === "semana") {
-    return [inicioSemanaISO(hoje), fimSemanaISO(hoje)];
-  }
-  if (nome === "semanapassada") {
-    const ref = new Date(hoje); ref.setDate(ref.getDate() - 7);
+  const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  if (tipo === "semana") {
+    const ref = new Date(hoje); ref.setDate(ref.getDate() + 7 * offset);
     return [inicioSemanaISO(ref), fimSemanaISO(ref)];
   }
-  if (nome === "mes") {
-    return [iso(new Date(hoje.getFullYear(), hoje.getMonth(), 1)), iso(hoje)];
+  const ini = new Date(hoje.getFullYear(), hoje.getMonth() + offset, 1);
+  // mês corrente vai só até hoje (como o antigo "Este mês")
+  const fim = offset === 0 ? hoje : new Date(hoje.getFullYear(), hoje.getMonth() + offset + 1, 0);
+  return [iso(ini), iso(fim)];
+}
+function rotuloNavegacao(tipo, offset) {
+  if (tipo === "semana") {
+    if (offset === 0) return "Esta semana";
+    if (offset === -1) return "Semana passada";
+    return `Há ${-offset} semanas`;
   }
-  if (nome === "mespassado") {
-    return [iso(new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1)), iso(new Date(hoje.getFullYear(), hoje.getMonth(), 0))];
-  }
-  return ["", ""]; // tudo
+  if (offset === 0) return "Este mês";
+  if (offset === -1) return "Mês passado";
+  const hoje = new Date();
+  const d = new Date(hoje.getFullYear(), hoje.getMonth() + offset, 1);
+  return `${MESES_LONGOS[d.getMonth()]}${d.getFullYear() !== hoje.getFullYear() ? `/${d.getFullYear()}` : ""}`;
+}
+function dataCurta(iso) {
+  const [, m, d] = iso.split("-");
+  return `${d}/${m}`;
 }
 // range imediatamente anterior, de mesma duração (em dias) que [de, ate]
 function periodoAnterior(de, ate) {
@@ -1003,7 +1057,52 @@ function controlesGraficoCupomHtml(prefixo) {
     </div>
   `;
 }
+/* ---------- zoom (− / +) dos gráficos "por cupom": quantos pontos
+   (semanas ou meses) cabem na janela. Com mais pontos que isso, o gráfico
+   fica mais largo que o card e ganha barra de rolagem horizontal — o eixo
+   de valores fica fixo à esquerda. Último nível = tudo na mesma janela. ---------- */
+const ZOOM_NIVEIS = { semana: [6, 12, 26, 52, Infinity], mes: [6, 12, 24, Infinity] };
+function zoomVisiveis(estado) {
+  const niveis = ZOOM_NIVEIS[estado.granularidade];
+  return niveis[Math.min(estado.zoom, niveis.length - 1)];
+}
+function zoomGraficoHtml(prefixo) {
+  return `<div class="chart-zoom" data-cupom-zoom="${prefixo}" role="group" aria-label="Zoom do gráfico">
+    <button type="button" class="chart-zoom-btn" data-zoom="-1" title="Diminuir zoom (ver mais períodos)" aria-label="Diminuir zoom">−</button>
+    <span class="chart-zoom-rotulo" data-zoom-rotulo></span>
+    <button type="button" class="chart-zoom-btn" data-zoom="1" title="Aumentar zoom (ver menos períodos)" aria-label="Aumentar zoom">+</button>
+  </div>`;
+}
+function atualizarZoomUi(app, prefixo, estado) {
+  const box = app.querySelector(`[data-cupom-zoom="${prefixo}"]`);
+  if (!box) return;
+  const niveis = ZOOM_NIVEIS[estado.granularidade];
+  estado.zoom = Math.min(estado.zoom, niveis.length - 1);
+  // se a janela atual já cabe o histórico inteiro, os níveis acima dela
+  // seriam iguais — trata como "Tudo" e trava o "−"
+  const total = estado.totalPontos ?? Infinity;
+  const v = zoomVisiveis(estado);
+  const mostraTudo = v >= total;
+  const unidade = estado.granularidade === "mes" ? "meses" : "sem.";
+  box.querySelector("[data-zoom-rotulo]").textContent = mostraTudo || v === Infinity ? "Tudo" : `${v} ${unidade}`;
+  box.querySelector('[data-zoom="-1"]').disabled = mostraTudo || estado.zoom >= niveis.length - 1;
+  box.querySelector('[data-zoom="1"]').disabled = estado.zoom <= 0;
+}
 function wireControlesGraficoCupom(app, prefixo, estado, redesenhar) {
+  atualizarZoomUi(app, prefixo, estado);
+  app.querySelector(`[data-cupom-zoom="${prefixo}"]`)?.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-zoom]");
+    if (!btn || btn.disabled) return;
+    // "−" afasta (mais pontos na janela) = sobe de nível; "+" aproxima
+    const niveis = ZOOM_NIVEIS[estado.granularidade];
+    const total = estado.totalPontos ?? Infinity;
+    let z = Math.max(0, Math.min(estado.zoom, niveis.length - 1) - Number(btn.dataset.zoom));
+    // "+" a partir de "Tudo": pula níveis que ainda mostrariam tudo
+    if (Number(btn.dataset.zoom) > 0) while (z > 0 && niveis[z] >= total) z--;
+    estado.zoom = z;
+    atualizarZoomUi(app, prefixo, estado);
+    redesenhar();
+  });
   app.querySelector(`[data-cupom-tier="${prefixo}"]`).addEventListener("click", (e) => {
     const btn = e.target.closest("[data-tier]");
     if (!btn) return;
@@ -1016,6 +1115,7 @@ function wireControlesGraficoCupom(app, prefixo, estado, redesenhar) {
     if (!btn) return;
     estado.granularidade = btn.dataset.gran;
     app.querySelectorAll(`[data-cupom-gran="${prefixo}"] .chip`).forEach((c) => c.classList.toggle("active", c === btn));
+    atualizarZoomUi(app, prefixo, estado);
     redesenhar();
   });
 }
@@ -1026,7 +1126,7 @@ function wireControlesGraficoCupom(app, prefixo, estado, redesenhar) {
    (20%/50%/Ambos — ver cupomEhEspecial) e agrupado por semana ou mês
    conforme o estado de granularidade. ---------- */
 function desenharGraficoCupons(app, opts) {
-  const { containerId, tabelaBodyId, lancamentosTotais, porId, porIdGrupo, campo, estado, formatValue, formatAxis } = opts;
+  const { containerId, zoomId, tabelaBodyId, lancamentosTotais, porId, porIdGrupo, campo, estado, formatValue, formatAxis } = opts;
   const [de, ate] = limitesEfetivos(lancamentosTotais, "", "");
   const chaveDe = estado.granularidade === "mes" ? chaveMes : chaveSemana;
 
@@ -1050,6 +1150,8 @@ function desenharGraficoCupons(app, opts) {
   const rotulo = estado.granularidade === "mes" ? rotuloMesCurto : rotuloSemanaCurto;
   const pontos = chaves.map((c) => ({ label: rotulo(c), value: porChaveTempo.get(c) || 0, estimado: chavesEstimadas.has(c) }));
 
+  estado.totalPontos = pontos.length;
+  if (zoomId) atualizarZoomUi(app, zoomId, estado);
   const container = app.querySelector(`#${containerId}`);
   const tabelaBody = tabelaBodyId ? app.querySelector(`#${tabelaBodyId}`) : null;
 
@@ -1060,9 +1162,12 @@ function desenharGraficoCupons(app, opts) {
   }
 
   const temEstimado = pontos.some((p) => p.estimado);
-  container.innerHTML = lineChartSVG(pontos, formatValue, formatAxis)
+  container.innerHTML = lineChartSVG(pontos, formatValue, formatAxis, zoomVisiveis(estado))
     + (temEstimado ? `<div class="muted chart-nota-estimado">Trecho tracejado: valores estimados — lançamentos mensais divididos pelos dias de cada semana.</div>` : "");
   wireLineChartHover(container, pontos, formatValue);
+  // abre mostrando o período mais recente (fim do histórico)
+  const rolagem = container.querySelector(".viz-zoom-scroll");
+  if (rolagem) rolagem.scrollLeft = rolagem.scrollWidth;
 
   if (tabelaBody) {
     tabelaBody.innerHTML = "";
@@ -1086,11 +1191,17 @@ function mesLabel(m) {
   return `${MES_NOMES[parseInt(mo, 10) - 1]}/${y.slice(2)}`;
 }
 
-function lineChartSVG(pontos, formatValue, formatAxis = formatCompact) {
-  const W = 640, H = 220;
+function lineChartSVG(pontos, formatValue, formatAxis = formatCompact, visiveis = Infinity) {
+  const W0 = 640, H = 220;
   const padL = 54, padR = 16, padT = 16, padB = 30;
-  const plotW = W - padL - padR, plotH = H - padT - padB;
   const n = pontos.length;
+  // zoom: com mais pontos que "visiveis", cada intervalo mantém a largura
+  // que teria na janela e o SVG cresce pra direita (rolagem no wrapper)
+  const comZoom = n > visiveis && visiveis > 1;
+  const plotW0 = W0 - padL - padR;
+  const plotW = comZoom ? ((n - 1) * plotW0) / (visiveis - 1) : plotW0;
+  const W = padL + plotW + padR;
+  const plotH = H - padT - padB;
   const maxVal = Math.max(...pontos.map((p) => p.value), 1);
   const niceMax = niceCeil(maxVal);
   const x = (i) => padL + (n === 1 ? plotW / 2 : (i / (n - 1)) * plotW);
@@ -1121,7 +1232,10 @@ function lineChartSVG(pontos, formatValue, formatAxis = formatCompact) {
     : `<circle cx="${x(i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="4" fill="var(--chart-series-a)" stroke="var(--surface)" stroke-width="2"/>`
   ).join("");
 
-  const xLabels = pontos.map((p, i) =>
+  // com muitos pontos na janela, mostra só 1 rótulo a cada "passo"
+  const espacoPorPonto = n > 1 ? plotW / (n - 1) : plotW;
+  const passoRotulo = Math.max(1, Math.ceil(44 / espacoPorPonto));
+  const xLabels = pontos.map((p, i) => ((n - 1 - i) % passoRotulo !== 0) ? "" :
     `<text x="${x(i).toFixed(1)}" y="${H - 8}" text-anchor="middle" font-size="11" fill="var(--chart-ink-muted)">${esc(p.label)}</text>`
   ).join("");
 
@@ -1136,7 +1250,7 @@ function lineChartSVG(pontos, formatValue, formatAxis = formatCompact) {
     return `<rect data-idx="${i}" data-cx="${cx.toFixed(1)}" x="${left.toFixed(1)}" y="${padT}" width="${width.toFixed(1)}" height="${plotH}" fill="transparent" tabindex="0" role="img" aria-label="${esc(p.label)}: ${esc(formatValue(p.value))}${p.estimado ? " (estimado)" : ""}"/>`;
   }).join("");
 
-  return `<svg viewBox="0 0 ${W} ${H}" class="viz-svg" preserveAspectRatio="xMidYMid meet">
+  const svg = `<svg viewBox="0 0 ${W} ${H}" class="viz-svg" preserveAspectRatio="xMidYMid meet"${comZoom ? ` style="width:${((W / W0) * 100).toFixed(3)}%"` : ""}>
     ${gridLines}
     <path d="${areaPath}" fill="var(--chart-series-a)" opacity="0.10" stroke="none"/>
     <path d="${linePath}" fill="none" stroke="var(--chart-series-a)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
@@ -1147,6 +1261,18 @@ function lineChartSVG(pontos, formatValue, formatAxis = formatCompact) {
     <line id="viz-crosshair" x1="0" y1="${padT}" x2="0" y2="${padT + plotH}" stroke="var(--baseline, var(--border-strong))" stroke-width="1" style="display:none"/>
     ${hitAreas}
   </svg>`;
+  if (!comZoom) return svg;
+
+  // eixo de valores fixo por cima da coluna esquerda enquanto o gráfico rola
+  let eixo = `<rect x="0" y="0" width="${padL}" height="${H}" fill="var(--surface)"/>`;
+  for (let i = 0; i <= ticks; i++) {
+    const v = (niceMax / ticks) * i;
+    eixo += `<text x="${padL - 8}" y="${y(v) + 4}" text-anchor="end" font-size="11" fill="var(--chart-ink-muted)">${esc(formatAxis(v))}</text>`;
+  }
+  return `<div class="viz-zoom">
+    <div class="viz-zoom-scroll">${svg}</div>
+    <svg class="viz-zoom-eixo" viewBox="0 0 ${padL} ${H}" style="width:${((padL / W0) * 100).toFixed(3)}%" aria-hidden="true">${eixo}</svg>
+  </div>`;
 }
 
 function wireLineChartHover(container, pontos, formatValue) {

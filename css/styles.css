@@ -736,6 +736,47 @@ button { font: inherit; }
   padding: 4px 12px; font-size: 11.5px; font-weight: 700; color: var(--text-soft); cursor: pointer;
 }
 .chart-toggle:hover { background: var(--surface-2); color: var(--text); }
+/* navegador de período do Desempenho: "‹ Semana passada ›" */
+.nav-periodo {
+  display: inline-flex; align-items: stretch; border: 1px solid var(--border-strong); border-radius: 999px;
+  overflow: hidden; background: var(--surface); height: 44px;
+}
+/* "Tudo" com a mesma altura dos navegadores de semana/mês */
+#presets [data-preset="tudo"] { height: 44px; padding: 0 18px; font-size: 13px; }
+.nav-periodo button { background: transparent; border: 0; cursor: pointer; color: var(--text-soft); font: inherit; }
+.nav-periodo-seta { width: 30px; font-size: 18px; font-weight: 700; line-height: 1; }
+.nav-periodo-seta:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
+.nav-periodo-seta:disabled { opacity: 0.3; cursor: default; }
+.nav-periodo-rotulo {
+  padding: 0 10px; font-size: 13px; font-weight: 700; min-width: 112px; text-align: center;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.15;
+}
+.nav-periodo-datas { font-size: 10.5px; font-weight: 600; opacity: 0.75; }
+.nav-periodo-datas:empty { display: none; }
+.nav-periodo.active { background: var(--accent); border-color: var(--accent); }
+.nav-periodo.active button { color: #fff; }
+.nav-periodo.active .nav-periodo-seta:hover:not(:disabled) { background: rgba(255,255,255,0.15); color: #fff; }
+.chart-head-acoes { display: flex; align-items: center; gap: 8px; }
+.chart-zoom {
+  display: inline-flex; align-items: center; border: 1px solid var(--border-strong); border-radius: 999px;
+  overflow: hidden;
+}
+.chart-zoom-btn {
+  background: transparent; border: 0; width: 26px; height: 24px; font-size: 15px; font-weight: 700; line-height: 1;
+  color: var(--text-soft); cursor: pointer;
+}
+.chart-zoom-btn:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
+.chart-zoom-btn:disabled { opacity: 0.35; cursor: default; }
+.chart-zoom-rotulo {
+  min-width: 52px; text-align: center; font-size: 11px; font-weight: 700; color: var(--text-soft);
+  font-variant-numeric: tabular-nums; border-left: 1px solid var(--border); border-right: 1px solid var(--border);
+  padding: 4px 6px;
+}
+/* gráfico com zoom: rola na horizontal, eixo de valores fixo à esquerda */
+.viz-zoom { position: relative; }
+.viz-zoom-scroll { overflow-x: auto; overflow-y: hidden; padding-bottom: 4px; scrollbar-width: thin; }
+.viz-zoom-scroll .viz-svg { overflow: hidden; max-width: none; }
+.viz-zoom-eixo { position: absolute; left: 0; top: 0; height: auto; display: block; pointer-events: none; }
 .chart-table { display: none; }
 .chart-table.show { display: block; }
 .chart-table th, .chart-table td { text-align: left; padding: 5px 10px 5px 0; font-size: 12.5px; }
